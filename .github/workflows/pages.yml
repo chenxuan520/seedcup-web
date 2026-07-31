@@ -38,10 +38,13 @@ jobs:
       - name: 构建网页
         run: npm run build
 
+      - name: 切换 Pages 发布源
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PUT "repos/${GITHUB_REPOSITORY}/pages" -f build_type=workflow
+
       - name: 配置 Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: 上传构建产物
         uses: actions/upload-pages-artifact@v3
