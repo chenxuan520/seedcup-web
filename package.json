@@ -1,7 +1,13 @@
 {
-  "name": "seedcup-web-demo",
+  "name": "seedcup-web",
   "private": true,
   "version": "0.0.0",
+  "description": "2023 年种子杯炸弹人题目的浏览器机器人竞技场",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chenxuan520/seedcup-web.git"
+  },
+  "homepage": "https://chenxuan520.github.io/seedcup-web/",
   "type": "module",
   "scripts": {
     "dev": "vite",

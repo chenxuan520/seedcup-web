@@ -2,8 +2,11 @@
 
 2023 年种子杯（SeedCup）炸弹人题目的浏览器交互版。项目使用 TypeScript 复刻服务端游戏状态与核心规则，并提供简单、困难、搜索、纯神经网络、神经网络加搜索五种机器人，可直接观看对局或手动参战。
 
+在线体验：[https://chenxuan520.github.io/seedcup-web/](https://chenxuan520.github.io/seedcup-web/)
+
 相关项目：
 
+- [本项目源码](https://github.com/chenxuan520/seedcup-web)
 - [官方服务端](https://github.com/chenxuan520/seedcup2023)
 - [C++ Bot SDK](https://gitee.com/chenxuan520/seedcup-cppsdk)
 - [C++ 深度学习库](https://github.com/chenxuan520/deeplearning)
@@ -54,7 +57,9 @@ npm run dev -- --host 0.0.0.0
 npm run build
 ```
 
-将整个 `dist/` 目录部署到任意静态托管服务即可，例如 GitHub Pages、Vercel、Netlify、Nginx 或对象存储静态网站。构建产物使用相对基路径，既支持部署到域名根目录，也支持部署到 `/seedcup-web-demo/` 一类子目录。
+将整个 `dist/` 目录部署到任意静态托管服务即可，例如 GitHub Pages、Vercel、Netlify、Nginx 或对象存储静态网站。构建产物使用相对基路径，既支持部署到域名根目录，也支持部署到 `/seedcup-web/` 一类子目录。
+
+仓库内置 `.github/workflows/pages.yml`。推送 `main` 后，GitHub Actions 会自动构建并发布到 GitHub Pages，无需提交 `dist/`。
 
 部署时需要注意：
 

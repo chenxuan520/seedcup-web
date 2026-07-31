@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 port="${SEEDCUP_TEST_PORT:-4173}"
 url="http://127.0.0.1:$port/"
-server_log="${TMPDIR:-/tmp}/seedcup-web-demo-preview-$$.log"
+server_log="${TMPDIR:-/tmp}/seedcup-web-preview-$$.log"
 server_pid=""
 
 cleanup() {

@@ -26,7 +26,7 @@ if [[ -z "$source_model" || ! -f "$source_model" ]]; then
 也可以设置环境变量：
   SEEDCUP_MODEL=/模型目录/$model_name npm run prepare:model
 
-若 seedcup-web-demo 与 seedcup-cppsdk 位于同一父目录，脚本会自动查找：
+若 seedcup-web 与 seedcup-cppsdk 位于同一父目录，脚本会自动查找：
   ../seedcup-cppsdk/src/$model_name
 
 相关源码：
