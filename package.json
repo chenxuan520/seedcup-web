@@ -1,0 +1,27 @@
+{
+  "name": "seedcup-web-demo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "prepare:model": "bash scripts/prepare-model.sh",
+    "check:nn-parity": "tsx scripts/check-nn-parity.ts",
+    "check:nn-sequence": "tsx scripts/check-nn-sequence.ts",
+    "test:bots": "tsx scripts/selftest-bots.ts",
+    "test:speed": "tsx scripts/verify-speed.ts",
+    "test:settings": "tsx scripts/advanced-check.ts",
+    "test:e2e": "tsx scripts/e2e.ts",
+    "test:browser": "bash scripts/run-browser-tests.sh",
+    "test:all": "npm run build && npm run check:nn-parity && npm run check:nn-sequence && npm run test:speed && npm run test:bots",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "playwright": "^1.62.1",
+    "tsx": "^4.23.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  }
+}

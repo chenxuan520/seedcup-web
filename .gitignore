@@ -1,0 +1,41 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.env.*
+!.env.example
+
+# 日志
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 默认忽略实验模型，仅提交网页运行使用的固定权重。
+*.rnn
+!public/models/pure-nn.rnn
+
+# 测试与覆盖率产物
+e2e-*.png
+test-results/
+playwright-report/
+blob-report/
+.cache/
+coverage/
+*.tmp
+
+# 编辑器与系统文件
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
