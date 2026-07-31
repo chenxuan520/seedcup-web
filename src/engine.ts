@@ -1,3 +1,8 @@
+import {
+  CppMt19937,
+  type CppMt19937Snapshot,
+} from './cpp-random';
+
 // SeedCup 2023 浏览器模拟器
 // 规则严格对齐原版服务端 seedcup2023/src/server/game/*（game.cpp / player.h /
 // bomb.h / area.h / potion/* / block/*）。不自行发明数值或流程。
@@ -71,6 +76,7 @@ export interface BombState {
   timeLeft: number; // 对齐 bomb_time_：>0 递减，==0 时爆炸
   ownerId: number;
   status: BombStatus;
+  lastPusherId?: number;
 }
 
 export interface BlockMeta {
@@ -116,10 +122,35 @@ export interface GameState {
   rng: Rng;
 }
 
+export interface SerializedGameState {
+  config: GameConfig;
+  seed: number;
+  round: number;
+  over: boolean;
+  winnerIds: number[];
+  rngState: CppMt19937Snapshot;
+  cells: Array<
+    Array<{
+      block: BlockKind;
+      item: Item;
+      bombId: number | null;
+      players: number[];
+    }>
+  >;
+  players: PlayerState[];
+  bombs: BombState[];
+  nextBombId: number;
+  blockMeta: BlockMeta[];
+}
+
 export interface StepEvent {
   kind: 'move' | 'place' | 'explode' | 'pickup' | 'damage' | 'round' | 'gameover';
   text: string;
   cells?: Array<[number, number]>; // explode 事件携带爆炸覆盖的格子
+  playerId?: number;
+  ownerId?: number;
+  bombOwnerId?: number;
+  pusherId?: number;
 }
 
 export interface BotController {
@@ -134,39 +165,43 @@ export interface BotController {
 // mulberry32：确定性 PRNG。C++ 用 mt19937，逐位无法复现，但保证规则语义与
 // 生成流程一致（同一种子在本模拟器内可复现）。
 export class Rng {
-  private state: number;
+  private generator: CppMt19937;
 
   constructor(seed: number) {
-    this.state = seed >>> 0;
+    this.generator = new CppMt19937(seed >>> 0);
   }
 
   next(): number {
-    this.state += 0x6d2b79f5;
-    let t = this.state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    return this.generator.nextUint32() / 4294967296;
   }
 
   // 对齐服务端 Random(0,100)：返回 [0,99]
   probability(): number {
-    return Math.floor(this.next() * 100);
+    return this.generator.uniformInt(99);
   }
 
   int(maxExclusive: number): number {
-    return Math.floor(this.next() * maxExclusive);
+    if (maxExclusive <= 0) return 0;
+    return this.generator.uniformInt(maxExclusive - 1);
   }
 
   fork(salt: number): Rng {
-    return new Rng((this.state ^ Math.imul(salt + 1, 0x9e3779b9)) >>> 0);
+    const copy = new Rng(0);
+    copy.generator = this.generator.clone();
+    for (let index = 0; index <= salt; index++) copy.generator.nextUint32();
+    return copy;
   }
 
-  snapshot(): number {
-    return this.state >>> 0;
+  shuffle<T>(values: T[]): void {
+    this.generator.shuffle(values);
   }
 
-  restore(state: number): void {
-    this.state = state >>> 0;
+  snapshot(): CppMt19937Snapshot {
+    return this.generator.snapshot();
+  }
+
+  restore(state: CppMt19937Snapshot): void {
+    this.generator.restore(state);
   }
 }
 
@@ -330,10 +365,7 @@ function makePlayer(id: number, name: string, x: number, y: number, color: strin
 }
 
 function shuffle<T>(arr: T[], rng: Rng): void {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = rng.int(i + 1);
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
+  rng.shuffle(arr);
 }
 
 export function cloneGame(state: GameState, rngSalt = 0): GameState {
@@ -356,6 +388,57 @@ export function cloneGame(state: GameState, rngSalt = 0): GameState {
   for (const [id, m] of meta) clonedMeta.set(id, { ...m });
   (cloned as unknown as { blockMeta: Map<number, BlockMeta> }).blockMeta = clonedMeta;
   return cloned;
+}
+
+export function serializeGameState(state: GameState): SerializedGameState {
+  return {
+    config: { ...state.config },
+    seed: state.seed,
+    round: state.round,
+    over: state.over,
+    winnerIds: [...state.winnerIds],
+    rngState: state.rng.snapshot(),
+    cells: state.cells.map((row) =>
+      row.map((cell) => ({
+        block: cell.block,
+        item: cell.item,
+        bombId: cell.bombId,
+        players: [...cell.players],
+      })),
+    ),
+    players: state.players.map((player) => ({ ...player })),
+    bombs: state.bombs.map((bomb) => ({ ...bomb })),
+    nextBombId: state.nextBombId,
+    blockMeta: [...getBlockMeta(state).values()].map((block) => ({ ...block })),
+  };
+}
+
+export function deserializeGameState(source: SerializedGameState): GameState {
+  const rng = new Rng(source.seed);
+  rng.restore(source.rngState);
+  const state: GameState = {
+    config: { ...source.config },
+    seed: source.seed,
+    round: source.round,
+    over: source.over,
+    winnerIds: [...source.winnerIds],
+    cells: source.cells.map((row) =>
+      row.map((cell) => ({
+        block: cell.block,
+        item: cell.item,
+        bombId: cell.bombId,
+        players: new Set(cell.players),
+      })),
+    ),
+    players: source.players.map((player) => ({ ...player })),
+    bombs: source.bombs.map((bomb) => ({ ...bomb })),
+    nextBombId: source.nextBombId,
+    rng,
+  };
+  (state as unknown as { blockMeta: Map<number, BlockMeta> }).blockMeta = new Map(
+    source.blockMeta.map((block) => [block.id, { ...block }]),
+  );
+  return state;
 }
 
 export function inBounds(state: GameState, x: number, y: number): boolean {
@@ -471,6 +554,7 @@ export function applyAction(state: GameState, playerId: number, action: Action, 
     const bomb = bombAt(state, dst.bombId);
     if (bomb && bomb.status === BombStatus.Silent) {
       bomb.status = action as unknown as BombStatus; // Left/Right/Up/Down 对齐
+      bomb.lastPusherId = player.id;
     }
     return; // 推弹后玩家不移动
   }
@@ -592,11 +676,10 @@ export function runRound(state: GameState, bots: Map<number, BotController>, hum
     actionBatches.set(player.id, actions);
   }
 
-  // 对齐 GameSim::Step：决策时看到旧 round，提交后才 round++，再按子步
-  // round-robin 应用动作；奇数轮反转玩家顺序以模拟到达顺序抖动。
-  state.round++;
+  // 同步评估路径保留确定性的交错顺序。网页运行时使用独立 Web Worker，
+  // 通过 applyActionBatch 按真实返回顺序模拟服务端收包。
   const order = state.players.map((player) => player.id);
-  if (state.round & 1) order.reverse();
+  if ((state.round + 1) & 1) order.reverse();
   const maxSteps = Math.max(
     1,
     ...state.players.map(
@@ -613,15 +696,41 @@ export function runRound(state: GameState, bots: Map<number, BotController>, hum
     }
   }
 
+  flushRound(state, events);
+  return events;
+}
+
+export function applyActionBatch(
+  state: GameState,
+  playerId: number,
+  actions: readonly Action[],
+  events: StepEvent[] = [],
+): void {
+  if (state.over) return;
+  const player = state.players.find((candidate) => candidate.id === playerId);
+  if (!player?.alive) return;
+  const accepted = actions.slice(0, Math.max(0, player.speed));
+  for (const action of accepted) {
+    if (!player.alive) break;
+    applyAction(state, playerId, action, events);
+    cleanDeadPlayers(state);
+  }
+}
+
+export function flushRound(
+  state: GameState,
+  events: StepEvent[] = [],
+): void {
+  if (state.over) return;
+  state.round++;
   flushBombMove(state, events);
   flushBombExplode(state, events);
   flushPlayers(state);
   events.push({ kind: 'round', text: `第 ${state.round} 回合` });
   checkGameOver(state, events);
-  return events;
 }
 
-function simulateClientAction(
+export function simulateClientAction(
   state: GameState,
   playerId: number,
   action: Action,
@@ -670,7 +779,7 @@ function simulateClientAction(
       player.shield += 32767;
       break;
     case Item.Rebirth:
-      if (player.hp < state.config.playerMaxHp) player.hp++;
+      player.hp++;
       break;
     case Item.Speed:
       player.speed++;
@@ -711,10 +820,16 @@ function flushBombMove(state: GameState, _events: StepEvent[]): void {
 // --- 对齐 FlushBombExplode ---
 function flushBombExplode(state: GameState, events: StepEvent[]): void {
   const meta = getBlockMeta(state);
-  const queue: number[] = [];
+  const queue: Array<{ bombId: number; rootOwnerId: number }> = [];
   for (const bomb of state.bombs) {
-    bomb.timeLeft--;
-    if (bomb.timeLeft <= 0) queue.push(bomb.id);
+    if (bomb.timeLeft > 0) {
+      bomb.timeLeft--;
+    } else {
+      queue.push({
+        bombId: bomb.id,
+        rootOwnerId: bomb.lastPusherId ?? bomb.ownerId,
+      });
+    }
   }
 
   const findBomb = (id: number) => state.bombs.find((b) => b.id === id);
@@ -727,7 +842,7 @@ function flushBombExplode(state: GameState, events: StepEvent[]): void {
   };
 
   while (queue.length) {
-    const bombId = queue.shift()!;
+    const { bombId, rootOwnerId } = queue.shift()!;
     const bomb = findBomb(bombId);
     if (!bomb) continue;
     const { x: bx, y: by, range } = bomb;
@@ -745,12 +860,19 @@ function flushBombExplode(state: GameState, events: StepEvent[]): void {
         const killed = injuries(state, victim);
         if (killed) {
           if (owner && owner.id !== pid) owner.score += state.config.markKill;
-          events.push({ kind: 'damage', text: `${victim.name} 被炸弹淘汰` });
+          events.push({
+            kind: 'damage',
+            text: `${victim.name} 被炸弹淘汰`,
+            playerId: pid,
+            ownerId: rootOwnerId,
+            bombOwnerId: owner?.id,
+            pusherId: bomb.lastPusherId,
+          });
         }
       }
       // 链爆
       if (area.bombId != null) {
-        queue.push(area.bombId);
+        queue.push({ bombId: area.bombId, rootOwnerId });
         return true;
       }
       // 炸道具
@@ -791,7 +913,10 @@ function flushBombExplode(state: GameState, events: StepEvent[]): void {
     events.push({ kind: 'explode', text: `炸弹在 ${bx},${by} 爆炸`, cells: blast });
   }
 
-  // 清理死亡玩家的格子占位
+  cleanDeadPlayers(state);
+}
+
+function cleanDeadPlayers(state: GameState): void {
   for (const p of state.players) {
     if (!p.alive && p.x >= 0) {
       state.cells[p.x][p.y].players.delete(p.id);

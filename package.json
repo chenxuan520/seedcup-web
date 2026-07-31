@@ -15,12 +15,14 @@
     "prepare:model": "bash scripts/prepare-model.sh",
     "check:nn-parity": "tsx scripts/check-nn-parity.ts",
     "check:nn-sequence": "tsx scripts/check-nn-sequence.ts",
+    "check:easy-parity": "tsx scripts/check-easy-parity.ts fixtures/easy_parity_seed42.json",
+    "check:easy-safety": "tsx scripts/check-easy-safety.ts",
     "test:bots": "tsx scripts/selftest-bots.ts",
     "test:speed": "tsx scripts/verify-speed.ts",
     "test:settings": "tsx scripts/advanced-check.ts",
     "test:e2e": "tsx scripts/e2e.ts",
     "test:browser": "bash scripts/run-browser-tests.sh",
-    "test:all": "npm run build && npm run check:nn-parity && npm run check:nn-sequence && npm run test:speed && npm run test:bots",
+    "test:all": "npm run build && npm run check:nn-parity && npm run check:nn-sequence && npm run check:easy-parity && npm run check:easy-safety && npm run test:speed && npm run test:bots",
     "preview": "vite preview"
   },
   "devDependencies": {

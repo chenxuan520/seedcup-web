@@ -1,13 +1,9 @@
 import { readFileSync } from 'node:fs';
 import {
-  BombStatus,
-  Item,
-  Rng,
+  createGame,
   defaultConfig,
   runRound,
   type BotController,
-  type BlockMeta,
-  type GameState,
 } from '../src/engine';
 import { PureNnBot, RuleBot } from '../src/bots';
 import { loadPureNnPolicyFromText } from '../src/rnn';
@@ -69,7 +65,11 @@ let wins = 0;
 let losses = 0;
 let draws = 0;
 for (let index = 0; index < fixture.maps.length; index++) {
-  const state = toGameState(fixture.seed + index, fixture.maps[index]);
+  const state = createGame(fixture.seed + index, {
+    ...defaultConfig,
+    size: fixture.maps[index].cells.length,
+    maxRound: 400,
+  });
   const nn = new PureNnBot(loadPureNnPolicyFromText(modelText));
   const easy = new RuleBot(false, 0);
   const bots = new Map<number, BotController>([
@@ -88,71 +88,3 @@ console.log(
     `easy_wins=${losses} draws=${draws} ` +
     `nn_winrate=${(wins / fixture.maps.length).toFixed(4)}`,
 );
-
-function toGameState(seed: number, source: FullMap): GameState {
-  const blockById = new Map(source.blocks.map((block) => [block.id, block]));
-  const state: GameState = {
-    config: { ...defaultConfig, size: source.cells.length, maxRound: 400 },
-    seed,
-    round: source.round,
-    over: false,
-    winnerIds: [],
-    cells: source.cells.map((row) =>
-      row.map((cell) => ({
-        block:
-          cell.block_id === -1
-            ? null
-            : blockById.get(cell.block_id)?.removable
-              ? 'mud'
-              : 'wall',
-        item: cell.item as Item,
-        bombId: cell.bomb_id === -1 ? null : cell.bomb_id,
-        players: new Set(cell.players),
-      })),
-    ),
-    players: source.players.map((player) => ({
-      id: player.id,
-      name: `P${player.id}`,
-      x: player.x,
-      y: player.y,
-      alive: player.alive !== 0,
-      hp: player.hp,
-      speed: player.speed,
-      bombMax: player.bomb_max_num,
-      bombNow: player.bomb_now_num,
-      bombRange: player.bomb_range,
-      invincible: player.invincible_time,
-      shield: player.shield_time,
-      gloves: player.has_gloves !== 0,
-      score: player.score,
-      color: player.id === source.player_id ? '#3b82f6' : '#ef4444',
-    })),
-    bombs: source.bombs.map((bomb) => ({
-      id: bomb.id,
-      x: bomb.x,
-      y: bomb.y,
-      range: bomb.range,
-      timeLeft: bomb.time_left,
-      ownerId: bomb.owner_id,
-      status: BombStatus.Silent,
-    })),
-    nextBombId: Math.max(1, ...source.bombs.map((bomb) => bomb.id + 1)),
-    rng: new Rng(seed),
-  };
-  const blockMeta = new Map<number, BlockMeta>();
-  for (const block of source.blocks) {
-    blockMeta.set(block.id, {
-      id: block.id,
-      x: block.x,
-      y: block.y,
-      removable: block.removable !== 0,
-      hiddenItem: block.hidden_item as Item,
-    });
-  }
-  (
-    state as unknown as {
-      blockMeta: Map<number, BlockMeta>;
-    }
-  ).blockMeta = blockMeta;
-  return state;
-}

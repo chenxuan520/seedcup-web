@@ -10,6 +10,7 @@ import {
 } from './engine';
 import type { BotController, GameState, PlayerState } from './engine';
 import type { PureNnPolicy } from './rnn';
+import { CppMt19937 } from './cpp-random';
 
 // ---------------------------------------------------------------------------
 // 规则 bot：严格移植自 C++ 原版 src/bot.h（SignDangerous / GetMaxMarkOper /
@@ -25,7 +26,6 @@ const kInvincibleMark = 5000;
 const kMudMark = 100;
 const kItemMark = 1500;
 const kPlayerMark = 2000;
-let globalRuleShuffleState = 0x9e3779b9;
 
 // 对应 C++ BotOper：0 静止 1 左 2 右 3 上 4 下 5 放弹
 const OPER_TO_ACTION: Action[] = [
@@ -92,6 +92,7 @@ export class RuleBot implements BotController {
   ];
   private selfInit: [number, number] = [-1, -1];
   private enemyInit: [number, number] = [-1, -1];
+  private moveShuffleRng = new CppMt19937();
 
   constructor(
     readonly hard = false,
@@ -105,6 +106,13 @@ export class RuleBot implements BotController {
     this.areaMark = [];
     this.selfInit = [-1, -1];
     this.enemyInit = [-1, -1];
+    this.moveGap = [
+      [0, 1],
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+    ];
+    this.moveShuffleRng = new CppMt19937();
     void playerId;
     void state;
   }
@@ -128,11 +136,12 @@ export class RuleBot implements BotController {
 
     if (this.orderMode !== 0) {
       this.applyDynamicMoveOrder(player.x, player.y);
-    } else {
-      this.shuffleMoveGap();
     }
 
     const dangerous = this.signDangerous(state, player);
+    if (!dangerous && this.orderMode === 0) {
+      this.shuffleMoveGap();
+    }
     const oper = dangerous
       ? this.escapeDangerousArea(state, player)
       : this.getMaxMarkOper(state, player);
@@ -140,18 +149,7 @@ export class RuleBot implements BotController {
   }
 
   private shuffleMoveGap(): void {
-    for (let index = this.moveGap.length - 1; index > 0; index--) {
-      globalRuleShuffleState += 0x6d2b79f5;
-      let value = globalRuleShuffleState;
-      value = Math.imul(value ^ (value >>> 15), value | 1);
-      value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-      const random = ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-      const swapIndex = Math.floor(random * (index + 1));
-      [this.moveGap[index], this.moveGap[swapIndex]] = [
-        this.moveGap[swapIndex],
-        this.moveGap[index],
-      ];
-    }
+    this.moveShuffleRng.shuffle(this.moveGap);
   }
 
   private initEnemyPos(state: GameState, playerId: number): void {
@@ -217,7 +215,10 @@ export class RuleBot implements BotController {
   }
 
   // --- C++ EscapeDangerousArea ---
-  private escapeDangerousArea(state: GameState, player: PlayerState): number {
+  private escapeDangerousArea(
+    state: GameState,
+    player: PlayerState,
+  ): number {
     const pass = Array.from({ length: this.size }, () => Array.from({ length: this.size }, () => 0));
     const queue: Array<[number, number, number]> = [[player.x, player.y, 0]];
     pass[player.x][player.y] = 1;
@@ -230,6 +231,7 @@ export class RuleBot implements BotController {
         if (!this.correctPos(x, y)) continue;
         if (pass[x][y]) continue;
         if (state.cells[x][y].block != null || state.cells[x][y].bombId != null) continue;
+        if (!this.hard && this.hasBombCapableOpponentAt(state, player.id, x, y)) continue;
         if (this.areaMark[x][y] < 0) {
           pass[x][y] = 1;
           queue.push([x, y, operLast]);
@@ -238,7 +240,7 @@ export class RuleBot implements BotController {
         return operLast; // 找到安全区
       }
     }
-    if (player.gloves) return this.getClosestMoveBomb(state, player);
+    if (this.hard && player.gloves) return this.getClosestMoveBomb(state, player);
     return 0; // 等死
   }
 
@@ -343,7 +345,8 @@ export class RuleBot implements BotController {
         if (
           state.cells[x][y].bombId != null ||
           state.cells[x][y].block != null ||
-          this.areaMark[x][y] < 0
+          this.areaMark[x][y] < 0 ||
+          (!this.hard && this.hasBombCapableOpponentAt(state, player.id, x, y))
         ) {
           continue;
         }
@@ -386,6 +389,22 @@ export class RuleBot implements BotController {
     return operTake;
   }
 
+  private hasBombCapableOpponentAt(
+    state: GameState,
+    playerId: number,
+    x: number,
+    y: number,
+  ): boolean {
+    return state.players.some(
+      (other) =>
+        other.id !== playerId &&
+        other.alive &&
+        other.x === x &&
+        other.y === y &&
+        other.bombNow < other.bombMax,
+    );
+  }
+
   private applyDynamicMoveOrder(x: number, y: number): void {
     const center = this.size > 0 ? Math.floor(this.size / 2) : 6;
     const vertical: Gap = x <= center ? [1, 0] : [-1, 0];
@@ -417,33 +436,164 @@ export class RuleBot implements BotController {
   private canPlaceBomb(state: GameState, player: PlayerState, px: number, py: number): boolean {
     const effectiveSpeed = this.hard ? player.speed : 1;
     const stepMax = effectiveSpeed * state.config.bombTime;
-    const blast = new Set<number>();
-    blast.add(px * 1000 + py);
-    for (const [gx, gy] of this.moveGap) {
-      for (let i = 0; i <= player.bombRange; i++) {
-        const nx = px + gx * i;
-        const ny = py + gy * i;
-        if (!this.correctPos(nx, ny)) continue;
-        if (state.cells[nx][ny].block != null) break;
-        blast.add(nx * 1000 + ny);
-      }
+    const baseBombs: Array<[number, number, number]> = [
+      [px, py, player.bombRange],
+    ];
+    if (!this.canEscapeWithVirtualBombs(state, [px, py], stepMax, baseBombs)) {
+      return false;
     }
 
+    if (this.hard) return true;
+
+    const combinedWorstCase: Array<[number, number, number]> = [...baseBombs];
+    for (const other of state.players) {
+      if (
+        other.id === player.id ||
+        !other.alive ||
+        other.bombNow >= other.bombMax
+      ) {
+        continue;
+      }
+
+      const reachable = this.reachablePositions(
+        state,
+        other,
+        Math.max(1, other.speed) * state.config.bombTime,
+      );
+      for (const [otherX, otherY] of reachable) {
+        const cell = state.cells[otherX][otherY];
+        if (cell.block != null || cell.bombId != null) continue;
+        combinedWorstCase.push([otherX, otherY, other.bombRange]);
+        const concurrentBombs: Array<[number, number, number]> = [
+          ...baseBombs,
+          [otherX, otherY, other.bombRange],
+        ];
+        if (
+          !this.canEscapeWithVirtualBombs(
+            state,
+            [px, py],
+            stepMax,
+            concurrentBombs,
+          )
+        ) {
+          return false;
+        }
+
+        if (!other.gloves) continue;
+        const dx = px - otherX;
+        const dy = py - otherY;
+        if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
+        const pushedX = px + dx;
+        const pushedY = py + dy;
+        if (!this.correctPos(pushedX, pushedY)) continue;
+        const pushedCell = state.cells[pushedX][pushedY];
+        if (
+          pushedCell.block != null ||
+          pushedCell.bombId != null ||
+          pushedCell.players.size > 0 ||
+          pushedCell.item !== Item.None
+        ) {
+          continue;
+        }
+        const pushedBombs: Array<[number, number, number]> = [
+          [pushedX, pushedY, player.bombRange],
+          [otherX, otherY, other.bombRange],
+        ];
+        if (
+          !this.canEscapeWithVirtualBombs(
+            state,
+            [px, py],
+            stepMax,
+            pushedBombs,
+          )
+        ) {
+          return false;
+        }
+      }
+    }
+    return this.canEscapeWithVirtualBombs(
+      state,
+      [px, py],
+      stepMax,
+      combinedWorstCase,
+    );
+  }
+
+  private reachablePositions(
+    state: GameState,
+    player: PlayerState,
+    maxSteps: number,
+  ): Array<[number, number]> {
+    const pass = Array.from(
+      { length: this.size },
+      () => Array.from({ length: this.size }, () => Number.MAX_SAFE_INTEGER),
+    );
+    const queue: Array<[number, number, number]> = [[player.x, player.y, 0]];
+    const result: Array<[number, number]> = [];
+    pass[player.x][player.y] = 0;
+    while (queue.length) {
+      const [x, y, distance] = queue.shift()!;
+      result.push([x, y]);
+      if (distance >= maxSteps) continue;
+      for (const [gx, gy] of this.moveGap) {
+        const nx = x + gx;
+        const ny = y + gy;
+        if (!this.correctPos(nx, ny)) continue;
+        const cell = state.cells[nx][ny];
+        if (cell.block != null || cell.bombId != null) continue;
+        if (distance + 1 >= pass[nx][ny]) continue;
+        pass[nx][ny] = distance + 1;
+        queue.push([nx, ny, distance + 1]);
+      }
+    }
+    return result;
+  }
+
+  private canEscapeWithVirtualBombs(
+    state: GameState,
+    start: [number, number],
+    stepMax: number,
+    bombs: Array<[number, number, number]>,
+  ): boolean {
+    const blast = new Set<number>();
+    const virtualBombs = new Set<number>();
+    const addBlast = (bombX: number, bombY: number, range: number) => {
+      virtualBombs.add(bombX * 1000 + bombY);
+      blast.add(bombX * 1000 + bombY);
+      for (const [gx, gy] of this.moveGap) {
+        for (let distance = 0; distance <= range; distance++) {
+          const nx = bombX + gx * distance;
+          const ny = bombY + gy * distance;
+          if (!this.correctPos(nx, ny)) continue;
+          if (state.cells[nx][ny].block != null) break;
+          blast.add(nx * 1000 + ny);
+        }
+      }
+    };
+    for (const [x, y, range] of bombs) addBlast(x, y, range);
+
     const pass = Array.from({ length: this.size }, () => Array.from({ length: this.size }, () => Number.MAX_SAFE_INTEGER));
-    pass[px][py] = 1;
-    const queue: Array<[number, number, number]> = [[px, py, 1]];
+    pass[start[0]][start[1]] = 1;
+    const queue: Array<[number, number, number]> = [[start[0], start[1], 1]];
     while (queue.length) {
       const [cx, cy, dist] = queue.shift()!;
       for (const [gx, gy] of this.moveGap) {
         const x = cx + gx;
         const y = cy + gy;
         if (!this.correctPos(x, y)) continue;
-        if (state.cells[x][y].block != null || state.cells[x][y].bombId != null) continue;
-        if (dist > stepMax || dist + 1 >= pass[x][y]) continue;
+        if (
+          state.cells[x][y].block != null ||
+          state.cells[x][y].bombId != null ||
+          virtualBombs.has(x * 1000 + y)
+        ) {
+          continue;
+        }
+        const nextDistance = dist + 1;
+        if (nextDistance - 1 > stepMax || nextDistance >= pass[x][y]) continue;
         if (this.areaMark[x][y] < 0) continue;
         if (blast.has(x * 1000 + y)) {
-          pass[x][y] = dist + 1;
-          queue.push([x, y, dist + 1]);
+          pass[x][y] = nextDistance;
+          queue.push([x, y, nextDistance]);
           continue;
         }
         return true; // 找到安全区

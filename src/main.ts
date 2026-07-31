@@ -6,16 +6,23 @@ import {
   type Cell,
   Item,
   Rng,
+  applyActionBatch,
   createGame,
   dangerInfo,
   defaultConfig,
-  runRound,
+  flushRound,
+  serializeGameState,
   type BotController,
   type GameState,
+  type SerializedGameState,
   type StepEvent,
 } from './engine';
 import { HybridSearchBot, ManualBot, PureNnBot, RuleBot, SearchBot } from './bots';
 import { loadPureNnPolicy, type PureNnPolicy } from './rnn';
+import type {
+  BotId,
+  BotWorkerResponse,
+} from './bot-protocol';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -28,7 +35,13 @@ app.innerHTML = `
         <p class="sub">2023 年种子杯 SeedCup 题目 · 浏览器炸弹人对战</p>
       </div>
     </div>
-    <div class="status-pill" id="modelStatus"><span class="dot"></span><span id="modelText">正在加载神经网络模型…</span></div>
+    <div class="topbar-actions">
+      <button class="help-trigger" id="helpBtn" type="button" aria-haspopup="dialog" aria-controls="helpDialog">
+        <span class="help-trigger-icon" aria-hidden="true">?</span>
+        <span>玩法帮助</span>
+      </button>
+      <div class="status-pill" id="modelStatus"><span class="dot"></span><span id="modelText">正在加载神经网络模型…</span></div>
+    </div>
   </header>
 
   <section class="source-strip">
@@ -182,6 +195,108 @@ app.innerHTML = `
       </div>
     </aside>
   </div>
+
+  <dialog class="help-dialog" id="helpDialog" aria-labelledby="helpTitle">
+    <div class="help-shell">
+      <header class="help-head">
+        <div>
+          <span class="help-kicker">SeedCup 2023</span>
+          <h2 id="helpTitle">炸弹人玩法说明</h2>
+          <p>默认由你控制蓝方，直接挑战红方纯神经网络。</p>
+        </div>
+        <button class="help-close" id="helpCloseBtn" type="button" aria-label="关闭帮助" title="关闭">×</button>
+      </header>
+
+      <div class="help-body">
+        <section class="help-section help-quickstart">
+          <div class="help-section-title">
+            <span class="help-step">01</span>
+            <div>
+              <h3>快速开始</h3>
+              <p>看到右上角“神经网络模型已加载”后即可开始。</p>
+            </div>
+          </div>
+          <div class="help-flow">
+            <div><strong>蓝方</strong><span>默认是你</span></div>
+            <span class="help-vs">VS</span>
+            <div class="nn"><strong>红方</strong><span>默认是纯神经网络</span></div>
+          </div>
+          <ol class="help-steps">
+            <li>使用 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 或方向键移动。</li>
+            <li>按 <kbd>空格</kbd> 放炸弹，及时离开红色危险范围。</li>
+            <li>炸开泥墙拾取道具，设法让对手生命归零。</li>
+          </ol>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">02</span>
+            <div>
+              <h3>胜负与炸弹</h3>
+              <p>炸弹倒计时结束后沿上下左右爆炸，墙体会阻挡火焰。</p>
+            </div>
+          </div>
+          <div class="help-rules">
+            <div><span class="rule-mark survive"></span><strong>最后存活</strong><p>场上只剩一名玩家时，该玩家立即获胜。</p></div>
+            <div><span class="rule-mark score"></span><strong>回合上限</strong><p>达到最大回合或无人存活时，按分数判定胜者。</p></div>
+            <div><span class="rule-mark blast"></span><strong>连锁爆炸</strong><p>爆炸会引爆范围内的其他炸弹，泥墙被炸毁后可能掉落道具。</p></div>
+          </div>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">03</span>
+            <div>
+              <h3>地图图例</h3>
+              <p>颜色与棋盘中的实际显示一致。</p>
+            </div>
+          </div>
+          <div class="help-map-grid">
+            <div class="help-map-item"><span class="map-swatch player blue"></span><div><strong>蓝方玩家</strong><p>默认由进入页面的用户控制。</p></div></div>
+            <div class="help-map-item"><span class="map-swatch player red"></span><div><strong>红方玩家</strong><p>默认使用纯神经网络策略。</p></div></div>
+            <div class="help-map-item"><span class="map-swatch wall"></span><div><strong>固定墙</strong><p>不可穿越，也无法被炸毁。</p></div></div>
+            <div class="help-map-item"><span class="map-swatch mud"></span><div><strong>泥墙</strong><p>可被炸毁，内部可能藏有道具。</p></div></div>
+            <div class="help-map-item"><span class="map-swatch bomb">3</span><div><strong>炸弹</strong><p>数字是剩余倒计时，爆炸呈十字形扩散。</p></div></div>
+            <div class="help-map-item"><span class="map-swatch danger"></span><div><strong>危险范围</strong><p>红色呼吸区域表示即将被炸弹覆盖。</p></div></div>
+          </div>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">04</span>
+            <div>
+              <h3>道具图标</h3>
+              <p>炸开泥墙后，道具会出现在空地上，走过去即可拾取。</p>
+            </div>
+          </div>
+          <div class="help-item-grid">
+            <div class="help-item-card"><span class="help-item-icon fire">✣</span><div><strong>火力</strong><p>爆炸范围增加 1 格。</p></div></div>
+            <div class="help-item-card"><span class="help-item-icon capacity">●<b>+</b></span><div><strong>炸弹</strong><p>可同时放置的炸弹上限增加 1。</p></div></div>
+            <div class="help-item-card"><span class="help-item-icon heal">♥</span><div><strong>回血</strong><p>生命未满时恢复 1 点生命。</p></div></div>
+            <div class="help-item-card"><span class="help-item-icon invincible">★</span><div><strong>无敌</strong><p>持续期间免疫伤害，接触其他玩家可造成致命伤害。</p></div></div>
+            <div class="help-item-card"><span class="help-item-icon shield">⬟</span><div><strong>护盾</strong><p>抵消下一次伤害，受伤后也会获得短暂护盾。</p></div></div>
+            <div class="help-item-card"><span class="help-item-icon speed">ϟ</span><div><strong>加速</strong><p>速度增加 1，每回合可执行更多移动。</p></div></div>
+            <div class="help-item-card"><span class="help-item-icon gloves">✊</span><div><strong>手套</strong><p>向炸弹移动时可将静止炸弹推向该方向。</p></div></div>
+          </div>
+        </section>
+
+        <section class="help-section help-status-section">
+          <div class="help-section-title">
+            <span class="help-step">05</span>
+            <div>
+              <h3>角色状态</h3>
+              <p>角色周围的光环和右侧玩家状态会同步显示效果。</p>
+            </div>
+          </div>
+          <div class="help-status-grid">
+            <div><span class="status-ring invincible"></span><strong>金色光环</strong><p>当前处于无敌状态。</p></div>
+            <div><span class="status-ring shield"></span><strong>青色光环</strong><p>当前拥有护盾保护。</p></div>
+            <div><span class="status-ring hp"></span><strong>绿色生命点</strong><p>每个亮点代表 1 点当前生命。</p></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </dialog>
 `;
 
 const canvas = document.querySelector<HTMLCanvasElement>('#board')!;
@@ -219,6 +334,9 @@ const modelText = document.querySelector<HTMLSpanElement>('#modelText')!;
 const winnerOverlay = document.querySelector<HTMLDivElement>('#winnerOverlay')!;
 const winnerBig = document.querySelector<HTMLDivElement>('#winnerBig')!;
 const winnerSub = document.querySelector<HTMLDivElement>('#winnerSub')!;
+const helpBtn = document.querySelector<HTMLButtonElement>('#helpBtn')!;
+const helpCloseBtn = document.querySelector<HTMLButtonElement>('#helpCloseBtn')!;
+const helpDialog = document.querySelector<HTMLDialogElement>('#helpDialog')!;
 
 const seatColors = ['#3b82f6', '#ef4444', '#22c55e', '#eab308'];
 const seatNames = ['蓝', '红', '绿', '黄'];
@@ -230,7 +348,12 @@ let running = false;
 let timer: number | null = null;
 let frame = 0;
 let gameOverLogged = false;
+let workerGeneration = 0;
+let workerRequestId = 0;
+let roundInFlight = false;
+let activeRoundToken = 0;
 const manualQueues = new Map<number, Action[]>();
+const botWorkers = new Map<number, BotWorkerClient>();
 
 // 爆炸特效：记录每个爆炸格的触发帧，draw 时按存活时长渲染火焰
 interface Blast {
@@ -252,7 +375,131 @@ const botOptions = [
   { id: 'nn', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
   { id: 'hybrid', label: '神经网络+搜索', note: '搜索为主，叠加一个小权重的 NN 策略先验。' },
 ];
-const defaultSeatBots = ['search', 'hard', 'easy', 'easy'];
+const defaultSeatBots = ['manual', 'nn', 'easy', 'easy'];
+const modelUrl = new URL(
+  `${import.meta.env.BASE_URL}models/pure-nn.rnn`,
+  window.location.href,
+).href;
+
+class BotWorkerClient {
+  private readonly worker: Worker;
+  private readonly pending = new Map<
+    number,
+    {
+      resolve: (actions: Action[]) => void;
+      reject: (error: Error) => void;
+    }
+  >();
+  private readonly readyPromise: Promise<void>;
+  private resolveReady!: () => void;
+  private rejectReady!: (error: Error) => void;
+
+  constructor(
+    readonly playerId: number,
+    readonly botId: BotId,
+    readonly generation: number,
+    initialState: SerializedGameState,
+  ) {
+    this.worker = new Worker(new URL('./bot-worker.ts', import.meta.url), {
+      type: 'module',
+      name: `seedcup-${botId}-p${playerId}`,
+    });
+    this.readyPromise = new Promise<void>((resolve, reject) => {
+      this.resolveReady = resolve;
+      this.rejectReady = reject;
+    });
+    this.worker.addEventListener('message', (event: MessageEvent<BotWorkerResponse>) => {
+      this.handleMessage(event.data);
+    });
+    this.worker.addEventListener('error', (event) => {
+      const error = new Error(event.message || `玩家 ${playerId} Worker 运行失败`);
+      this.rejectReady(error);
+      this.rejectPending(error);
+    });
+    this.worker.postMessage({
+      type: 'configure',
+      generation,
+      playerId,
+      botId,
+      modelUrl,
+      state: initialState,
+    });
+  }
+
+  ready(): Promise<void> {
+    return this.readyPromise;
+  }
+
+  async decide(
+    requestId: number,
+    stateSnapshot: SerializedGameState,
+  ): Promise<Action[]> {
+    await this.readyPromise;
+    return new Promise<Action[]>((resolve, reject) => {
+      this.pending.set(requestId, { resolve, reject });
+      this.worker.postMessage({
+        type: 'decide',
+        generation: this.generation,
+        requestId,
+        state: stateSnapshot,
+      });
+    });
+  }
+
+  terminate(): void {
+    this.worker.terminate();
+    this.rejectPending(new Error('Bot Worker 已重置'));
+  }
+
+  private handleMessage(message: BotWorkerResponse): void {
+    if (message.generation !== this.generation) return;
+    if (message.type === 'ready') {
+      this.resolveReady();
+      return;
+    }
+    if (message.type === 'error') {
+      const error = new Error(message.message);
+      if (message.requestId == null) this.rejectReady(error);
+      else {
+        const pending = this.pending.get(message.requestId);
+        this.pending.delete(message.requestId);
+        pending?.reject(error);
+      }
+      return;
+    }
+    const pending = this.pending.get(message.requestId);
+    this.pending.delete(message.requestId);
+    pending?.resolve(message.actions);
+  }
+
+  private rejectPending(error: Error): void {
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+}
+
+function isWorkerBot(botId: string): botId is BotId {
+  return botId !== 'manual';
+}
+
+function configureBotWorkers(): void {
+  workerGeneration++;
+  activeRoundToken++;
+  for (const client of botWorkers.values()) client.terminate();
+  botWorkers.clear();
+  const snapshot = serializeGameState(state);
+  const seats = seatBotIds();
+  for (let index = 0; index < state.players.length; index++) {
+    const botId = seats[index] ?? 'hard';
+    if (!isWorkerBot(botId)) continue;
+    const player = state.players[index];
+    botWorkers.set(
+      player.id,
+      new BotWorkerClient(player.id, botId, workerGeneration, snapshot),
+    );
+  }
+  canvas.dataset.botWorkers = String(botWorkers.size);
+}
 
 function makeBot(id: string): BotController {
   switch (id) {
@@ -339,6 +586,7 @@ function resetGame(): void {
   bots = new Map();
   state.players.forEach((p, i) => bots.set(p.id, makeBot(seats[i] ?? 'hard')));
   for (const [id, bot] of bots) bot.reset?.(id, state);
+  configureBotWorkers();
   logEl.innerHTML = '';
   blasts = [];
   facing.clear();
@@ -367,7 +615,7 @@ interface ExportedMatch {
     round: number;
     over: boolean;
     winnerIds: number[];
-    rngState: number;
+    rngState: SerializedGameState['rngState'];
     cells: Array<Array<{ block: string | null; item: number; bombId: number | null; players: number[] }>>;
     players: GameState['players'];
     bombs: GameState['bombs'];
@@ -484,6 +732,7 @@ function importMatch(payload: ExportedMatch): void {
   const seats = seatBotIds();
   state.players.forEach((player, index) => bots.set(player.id, makeBot(seats[index] ?? 'hard')));
   for (const [id, bot] of bots) bot.reset?.(id, state);
+  configureBotWorkers();
   manualQueues.clear();
   blasts = [];
   facing.clear();
@@ -511,8 +760,67 @@ function updateNames(): void {
     .join('<br />');
 }
 
-function stepGame(): void {
-  const events = runRound(state, bots, manualQueues);
+async function stepGame(): Promise<void> {
+  if (roundInFlight || state.over) return;
+  roundInFlight = true;
+  const generation = workerGeneration;
+  const roundToken = ++activeRoundToken;
+  const events: StepEvent[] = [];
+  const arrivalOrder: number[] = [];
+  canvas.dataset.arrivalOrder = '';
+  try {
+    const clients = [...botWorkers.values()];
+    const ready = await Promise.allSettled(clients.map((client) => client.ready()));
+    if (generation !== workerGeneration) return;
+    for (const result of ready) {
+      if (result.status === 'rejected') {
+        setError(`Bot Worker 初始化失败：${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+      }
+    }
+
+    const snapshot = serializeGameState(state);
+    const submissions: Array<Promise<void>> = [];
+    for (const player of state.players) {
+      if (!player.alive) continue;
+      const client = botWorkers.get(player.id);
+      if (client) {
+        const requestId = ++workerRequestId;
+        submissions.push(
+          client.decide(requestId, snapshot).then((actions) => {
+            if (
+              generation !== workerGeneration ||
+              roundToken !== activeRoundToken
+            ) {
+              return;
+            }
+            // 与 C++ 服务端一致：某个客户端的整批动作到达后立即按数组顺序执行。
+            arrivalOrder.push(player.id);
+            canvas.dataset.arrivalOrder = arrivalOrder.join(',');
+            applyActionBatch(state, player.id, actions, events);
+          }).catch((error: unknown) => {
+            if (generation !== workerGeneration) return;
+            setError(`Bot Worker 决策失败：${error instanceof Error ? error.message : String(error)}`);
+          }),
+        );
+      } else {
+        const queued = manualQueues.get(player.id) ?? [];
+        const actions = queued.splice(0, Math.max(0, player.speed));
+        applyActionBatch(state, player.id, actions, events);
+      }
+    }
+    await Promise.race([
+      Promise.allSettled(submissions),
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, currentRoundInterval());
+      }),
+    ]);
+    if (generation !== workerGeneration) return;
+    activeRoundToken++;
+    flushRound(state, events);
+  } finally {
+    roundInFlight = false;
+  }
+
   for (const e of events) {
     if (e.kind === 'explode' && e.cells) {
       for (const [x, y] of e.cells) blasts.push({ x, y, born: frame });
@@ -554,10 +862,14 @@ function pushLog(e: StepEvent): void {
 
 function loop(): void {
   if (timer != null) window.clearInterval(timer);
-  const ms = Math.max(60, 640 - Number(speedInput.value) * 48);
+  const ms = currentRoundInterval();
   timer = window.setInterval(() => {
-    if (running) stepGame();
+    if (running && !roundInFlight) void stepGame();
   }, ms);
+}
+
+function currentRoundInterval(): number {
+  return Math.max(60, 640 - Number(speedInput.value) * 48);
 }
 
 playBtn.addEventListener('click', () => {
@@ -568,7 +880,7 @@ playBtn.addEventListener('click', () => {
 });
 stepBtn.addEventListener('click', () => {
   if (state.over) return;
-  stepGame();
+  void stepGame();
 });
 resetBtn.addEventListener('click', resetGame);
 shuffleBtn.addEventListener('click', () => {
@@ -587,6 +899,22 @@ importFile.addEventListener('change', async () => {
     setError(`导入失败：${String(error).slice(0, 80)}`);
   }
 });
+
+function openHelp(): void {
+  if (!helpDialog.open) helpDialog.showModal();
+  document.body.classList.add('dialog-open');
+}
+
+function closeHelp(): void {
+  helpDialog.close();
+}
+
+helpBtn.addEventListener('click', openHelp);
+helpCloseBtn.addEventListener('click', closeHelp);
+helpDialog.addEventListener('click', (event) => {
+  if (event.target === helpDialog) closeHelp();
+});
+helpDialog.addEventListener('close', () => document.body.classList.remove('dialog-open'));
 speedInput.addEventListener('input', loop);
 playerNumSel.addEventListener('change', () => {
   renderBotSelectors();

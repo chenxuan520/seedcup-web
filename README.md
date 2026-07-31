@@ -20,6 +20,8 @@
 - 支持对局 JSON 导出与导入
 - 支持键盘手动操作和五类机器人
 - 浏览器内直接解析并运行 C++ 训练生成的 `DLRNNH1` 权重
+- 每个机器人运行在独立 Web Worker 中，按返回顺序模拟多个 C++ 客户端向服务端并发提交动作
+- 内置中文玩法帮助，说明胜负规则、地图元素、角色状态和七类道具图标
 
 ## 机器人
 
@@ -33,6 +35,20 @@
 | 神经网络加搜索 | 搜索为主，使用同一 RNN 策略作为小权重先验 |
 
 纯神经网络和神经网络加搜索共用一份权重，不存在第二个模型文件。
+
+首次进入页面时，蓝方默认是手动玩家，红方默认是纯神经网络，优先展示用户直接挑战 NN 的体验。需要观看机器人对战时，可在右侧“对局设置”中切换任意座位。
+
+## 并发模型
+
+浏览器主线程对应原 C++ 服务端，每个非手动玩家对应一个独立 Web Worker 客户端：
+
+1. 每回合开始时，主线程向所有 Worker 发送同一份只读状态快照。
+2. 每个 Worker 独立保留规则 bot 状态、方向随机数状态或 RNN hidden/history。
+3. Worker 在自己的线程内计算完整动作数组。
+4. 哪个 Worker 先返回，主线程就先按数组顺序执行哪个客户端的动作。
+5. 全部客户端返回或达到当前回合截止时间后，统一移动炸弹、结算爆炸并推进回合。
+
+这与原项目“多个 C++ 客户端独立计算并发回包，服务端单线程按网络到达顺序 `AddAction`，定时器统一 `FlushTime`”的执行边界一致。
 
 ## 安装运行
 
@@ -112,9 +128,11 @@ SEEDCUP_MODEL=/path/to/model.rnn npm run prepare:model
 - 空格：放置炸弹
 - 页面控制栏：开始、暂停、单步、重置和切换速度
 - 设置齿轮：调整地图、人数和高级对局参数
+- 顶栏“玩法帮助”：查看完整玩法、地图图例、状态效果和道具说明
 
 推荐展示组合：
 
+- 手动玩家 对 纯神经网络：默认组合，直接体验训练模型
 - 更强搜索 对 困难：展示规则和搜索效果
 - 纯神经网络 对 简单：展示独立 NN 策略
 - 手动玩家 对 困难或更强搜索：体验实际对战
@@ -127,7 +145,7 @@ SEEDCUP_MODEL=/path/to/model.rnn npm run prepare:model
 npm run test:all
 ```
 
-该命令依次执行生产构建、单帧 NN 对拍、40 步连续 NN 对拍、easy 单步规则检查和 bot 无卡死测试。
+该命令依次执行生产构建、单帧 NN 对拍、40 步连续 NN 对拍、easy 自炸安全回归、easy 单步规则检查和 bot 无卡死测试。
 
 浏览器 E2E 会自行启动临时预览服务，验证 2 人和 4 人对局、随机地图、种子复现、爆炸效果、高级设置以及导出导入：
 
@@ -141,19 +159,22 @@ npm run test:browser
 - 特征、历史、结果特征、动作上下文和完整输入的最大误差均为 `0`
 - 40 步输出概率最大误差为 `1.734723475976807e-18`
 - 40 步 top action 不一致数为 `0`
+- C++ easy 与 TypeScript easy 连续 `1,647` 个状态动作不一致数为 `0`
+- C++ 导出地图与 TypeScript `std::mt19937` 地图生成逐格对拍为 `60 / 60`
+- easy 对 easy / hard 的 `240` 局安全回归中，easy 自身导致死亡数为 `0`
 
 当前留档胜率用于回归，不代表所有地图和参数下的保证值：
 
 | 评估 | 结果 |
 | --- | --- |
-| 网页随机地图 paired，纯 NN 对 easy | 107 / 120，89.2% |
+| TypeScript，同 seed、NN 固定 P1、纯 NN 对 easy | 55 / 60，91.67% |
+| C++，同 seed、同服务端时序、NN 固定 P1 | 56 / 60，93.33% |
+| 网页随机地图 paired，纯 NN 对 easy | 97 / 120，80.83% |
 | 网页随机地图，纯 NN 对 hard | 15 / 60，25.0% |
-| C++ GameSim 同地图集，纯 NN 对 easy | 58 / 60，96.7% |
-| C++ `dl_eval` 基准，纯 NN 对 easy | 55 / 60，91.7% |
 
 ## 对齐方法
 
-`fixtures/` 保存由 C++ 导出的状态、特征和推理结果。单帧对拍用于定位静态特征或前向计算偏差，连续对拍则覆盖 RNN hidden state、动作历史、炸弹跟踪和多轮状态更新。
+`fixtures/` 保存由 C++ 导出的状态、特征和推理结果。单帧对拍用于定位静态特征或前向计算偏差，连续对拍则覆盖 RNN hidden state、动作历史、炸弹跟踪和多轮状态更新。easy 专项对拍使用 C++ `Bot::CalcOnce` 导出的连续状态与动作，验证 TypeScript 的 BFS、放弹判定、方向随机序和安全约束。
 
 网页实现用于交互展示，关键行为以官方服务端和 C++ `GameSim` 为对齐基准。涉及正式比赛结论或大规模胜率统计时，仍应以 C++ evaluator 为准。
 
@@ -162,6 +183,9 @@ npm run test:browser
 ```text
 src/engine.ts                  游戏状态、地图与回合模拟
 src/bots.ts                    规则、搜索、纯 NN 与混合机器人
+src/bot-worker.ts              独立机器人 Worker 客户端
+src/bot-protocol.ts            主线程与 Worker 消息协议
+src/cpp-random.ts              C++ std::mt19937 / std::shuffle 对齐实现
 src/rnn.ts                     DLRNNH1 解析、特征提取与推理
 src/main.ts                    页面结构、交互与 Canvas 绘制
 src/app.css                    页面样式与响应式布局
@@ -169,5 +193,7 @@ fixtures/                      C++/TypeScript 对拍数据
 scripts/prepare-model.sh       本地模型准备与校验
 scripts/check-nn-parity.ts     单帧数值对拍
 scripts/check-nn-sequence.ts   连续 40 步数值对拍
+scripts/check-easy-parity.ts   C++/TypeScript easy 连续动作对拍
+scripts/check-easy-safety.ts   easy 自炸安全回归
 scripts/run-browser-tests.sh   自启动服务的浏览器 E2E
 ```
