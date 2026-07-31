@@ -105,7 +105,7 @@ function createBot(
     case 'hard':
       return new RuleBot(true, 4);
     case 'search':
-      return new SearchBot(6, 2, 900);
+      return new SearchBot(6, 2, 0.05);
     case 'nn':
       return new PureNnBot(nnPolicy);
     case 'hybrid':

@@ -4,9 +4,11 @@ import { RuleBot } from '../src/bots';
 
 function maxStepDelta(makeP1: () => BotController, makeP2: () => BotController, seed: number) {
   const state = createGame(seed, { ...defaultConfig });
+  const p1Id = state.players[0].id;
+  const p2Id = state.players[1].id;
   const bots = new Map<number, BotController>([
-    [1, makeP1()],
-    [2, makeP2()],
+    [p1Id, makeP1()],
+    [p2Id, makeP2()],
   ]);
   for (const [id, b] of bots) b.reset?.(id, state);
   let maxP1 = 0;

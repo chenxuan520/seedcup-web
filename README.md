@@ -50,6 +50,11 @@
 
 这与原项目“多个 C++ 客户端独立计算并发回包，服务端单线程按网络到达顺序 `AddAction`，定时器统一 `FlushTime`”的执行边界一致。
 
+服务端地图概率、隐藏道具、炸弹时长、泥墙洗牌和出生点洗牌使用彼此独立的
+C++ 随机引擎。网页把用户输入的 seed 分别注入这些引擎，因此同一 seed 可以复现；
+官方服务端生产代码中的两个洗牌引擎由 `std::random_device` 播种，本身没有固定
+seed 复现接口。
+
 ## 安装运行
 
 需要 Node.js 20 或更新版本。
@@ -145,7 +150,8 @@ SEEDCUP_MODEL=/path/to/model.rnn npm run prepare:model
 npm run test:all
 ```
 
-该命令依次执行生产构建、单帧 NN 对拍、40 步连续 NN 对拍、easy 自炸安全回归、easy 单步规则检查和 bot 无卡死测试。
+该命令依次执行生产构建、官方服务端地图/RNG/规则/4 人场景对拍、搜索与混合
+搜索对拍、单帧和连续 NN 对拍、easy 安全回归、速度规则检查以及 bot 无卡死测试。
 
 浏览器 E2E 会自行启动临时预览服务，验证 2 人和 4 人对局、随机地图、种子复现、爆炸效果、高级设置以及导出导入：
 
@@ -156,27 +162,38 @@ npm run test:browser
 
 当前固定 fixture 的对拍结果：
 
+- 原服务端可控 seed 下，方块 ID/位置/隐藏道具、4 个出生点和连续 64 次炸弹随机值完全一致
+- 原服务端动作额度、推弹、倒计时、爆炸、死亡坐标、格子爆炸轮次和胜负场景完全一致
+- 原服务端 4 人同格无敌碰撞中，玩家集合顺序、伤害、护盾与状态递减完全一致
 - 特征、历史、结果特征、动作上下文和完整输入的最大误差均为 `0`
 - 40 步输出概率最大误差为 `1.734723475976807e-18`
 - 40 步 top action 不一致数为 `0`
 - C++ easy 与 TypeScript easy 连续 `1,647` 个状态动作不一致数为 `0`
-- C++ 导出地图与 TypeScript `std::mt19937` 地图生成逐格对拍为 `60 / 60`
-- easy 对 easy / hard 的 `240` 局安全回归中，easy 自身导致死亡数为 `0`
+- C++ RuleSearch/HybridSearch 共 `240` 个子步的 baseline、chosen、最终动作、六个候选分数和炸弹 tracker 不一致数为 `0`
+- easy 对 easy / hard 的双批次顺序安全回归中，顺序无关的主动自炸数为 `0`
+- 安全回归保留 `arrival_races` 指标：对手先到并抢占唯一出口时仍可能产生真实并发竞态
+- 同 `seed=1000..1059`、同 C++ `GameSim` 裁判下，C++/TypeScript 的 winner 和结束回合均为 `60 / 60` 一致
 
 当前留档胜率用于回归，不代表所有地图和参数下的保证值：
 
 | 评估 | 结果 |
 | --- | --- |
-| TypeScript，同 seed、NN 固定 P1、纯 NN 对 easy | 55 / 60，91.67% |
-| C++，同 seed、同服务端时序、NN 固定 P1 | 56 / 60，93.33% |
+| TypeScript，同 seed、C++ `GameSim`、NN 固定 P1、纯 NN 对 easy | 54 / 60，90.0% |
+| C++，同 seed、同 `GameSim`、NN 固定 P1、纯 NN 对 easy | 54 / 60，90.0% |
 | 网页随机地图 paired，纯 NN 对 easy | 97 / 120，80.83% |
 | 网页随机地图，纯 NN 对 hard | 15 / 60，25.0% |
 
 ## 对齐方法
 
-`fixtures/` 保存由 C++ 导出的状态、特征和推理结果。单帧对拍用于定位静态特征或前向计算偏差，连续对拍则覆盖 RNN hidden state、动作历史、炸弹跟踪和多轮状态更新。easy 专项对拍使用 C++ `Bot::CalcOnce` 导出的连续状态与动作，验证 TypeScript 的 BFS、放弹判定、方向随机序和安全约束。
+`fixtures/` 保存由 C++ 导出的服务端状态、特征和推理结果。`tools/cpp-fixtures/`
+保存对应生成器和复现说明。单帧对拍用于定位静态特征或前向计算偏差，连续对拍
+覆盖 RNN hidden state、动作历史、炸弹跟踪和多轮状态更新。easy 专项对拍使用
+C++ `Bot::CalcOnce` 导出的连续状态与动作，验证 TypeScript 的 BFS、放弹判定、
+方向随机序和安全约束。
 
-网页实现用于交互展示，关键行为以官方服务端和 C++ `GameSim` 为对齐基准。涉及正式比赛结论或大规模胜率统计时，仍应以 C++ evaluator 为准。
+官方服务端和 C++ 训练 `GameSim` 是两套不同裁判：网页主体验按官方服务端的
+`AddAction/FlushTime`、独立 RNG 和推弹规则运行；搜索 rollout 与训练胜率回归按
+C++ `GameSim` 运行。测试和文档分别标明裁判，不把两套语义混为一谈。
 
 ## 目录
 
@@ -186,6 +203,7 @@ src/bots.ts                    规则、搜索、纯 NN 与混合机器人
 src/bot-worker.ts              独立机器人 Worker 客户端
 src/bot-protocol.ts            主线程与 Worker 消息协议
 src/cpp-random.ts              C++ std::mt19937 / std::shuffle 对齐实现
+src/cpp-game-sim.ts            C++ 训练 GameSim 与搜索 rollout
 src/rnn.ts                     DLRNNH1 解析、特征提取与推理
 src/main.ts                    页面结构、交互与 Canvas 绘制
 src/app.css                    页面样式与响应式布局
@@ -195,5 +213,8 @@ scripts/check-nn-parity.ts     单帧数值对拍
 scripts/check-nn-sequence.ts   连续 40 步数值对拍
 scripts/check-easy-parity.ts   C++/TypeScript easy 连续动作对拍
 scripts/check-easy-safety.ts   easy 自炸安全回归
+scripts/check-server-*.ts      官方服务端生成、规则与 4 人场景对拍
+scripts/check-search-parity.ts RuleSearch/HybridSearch 子步级对拍
+tools/cpp-fixtures/            C++ fixture 生成器与复现说明
 scripts/run-browser-tests.sh   自启动服务的浏览器 E2E
 ```

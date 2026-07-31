@@ -1,6 +1,8 @@
 import {
   CppMt19937,
+  CppMt19937_64,
   type CppMt19937Snapshot,
+  type CppMt19937_64Snapshot,
 } from './cpp-random';
 
 // SeedCup 2023 浏览器模拟器
@@ -39,6 +41,8 @@ export interface Cell {
   item: Item; // 仅当 block 为 mud 时可携带隐藏道具；空地上的道具是炸出来的
   bombId: number | null;
   players: Set<number>;
+  lastBombRound: number;
+  playerBucketCount: number;
 }
 
 export interface PlayerState {
@@ -119,7 +123,10 @@ export interface GameState {
   players: PlayerState[];
   bombs: BombState[];
   nextBombId: number;
+  bombBucketCount: number;
   rng: Rng;
+  serverRng?: ServerRng;
+  acceptedActions?: Map<number, number>;
 }
 
 export interface SerializedGameState {
@@ -129,17 +136,21 @@ export interface SerializedGameState {
   over: boolean;
   winnerIds: number[];
   rngState: CppMt19937Snapshot;
+  serverRngState?: SerializedServerRng;
   cells: Array<
     Array<{
       block: BlockKind;
       item: Item;
       bombId: number | null;
       players: number[];
+      lastBombRound?: number;
+      playerBucketCount?: number;
     }>
   >;
   players: PlayerState[];
   bombs: BombState[];
   nextBombId: number;
+  bombBucketCount?: number;
   blockMeta: BlockMeta[];
 }
 
@@ -162,8 +173,7 @@ export interface BotController {
   movesPerTurn?(player: PlayerState): number;
 }
 
-// mulberry32：确定性 PRNG。C++ 用 mt19937，逐位无法复现，但保证规则语义与
-// 生成流程一致（同一种子在本模拟器内可复现）。
+// C++ std::mt19937 与 uniform_int_distribution 的逐位兼容封装。
 export class Rng {
   private generator: CppMt19937;
 
@@ -202,6 +212,54 @@ export class Rng {
 
   restore(state: CppMt19937Snapshot): void {
     this.generator.restore(state);
+  }
+}
+
+export interface SerializedServerRng {
+  probability: CppMt19937_64Snapshot;
+  potion: CppMt19937_64Snapshot;
+  bomb: CppMt19937_64Snapshot;
+  blockShuffle: CppMt19937Snapshot;
+  birthShuffle: CppMt19937Snapshot;
+}
+
+export class ServerRng {
+  readonly probability: CppMt19937_64;
+  readonly potion: CppMt19937_64;
+  readonly bomb: CppMt19937_64;
+  readonly blockShuffle: CppMt19937;
+  readonly birthShuffle: CppMt19937;
+
+  constructor(seed: number) {
+    this.probability = new CppMt19937_64(seed);
+    this.potion = new CppMt19937_64(seed);
+    this.bomb = new CppMt19937_64(seed);
+    this.blockShuffle = new CppMt19937(seed);
+    this.birthShuffle = new CppMt19937(seed);
+  }
+
+  snapshot(): SerializedServerRng {
+    return {
+      probability: this.probability.snapshot(),
+      potion: this.potion.snapshot(),
+      bomb: this.bomb.snapshot(),
+      blockShuffle: this.blockShuffle.snapshot(),
+      birthShuffle: this.birthShuffle.snapshot(),
+    };
+  }
+
+  restore(snapshot: SerializedServerRng): void {
+    this.probability.restore(snapshot.probability);
+    this.potion.restore(snapshot.potion);
+    this.bomb.restore(snapshot.bomb);
+    this.blockShuffle.restore(snapshot.blockShuffle);
+    this.birthShuffle.restore(snapshot.birthShuffle);
+  }
+
+  clone(): ServerRng {
+    const copy = new ServerRng(0);
+    copy.restore(this.snapshot());
+    return copy;
   }
 }
 
@@ -250,13 +308,40 @@ export const moveDeltas: Record<Action, [number, number]> = {
 
 const playerColors = ['#3b82f6', '#ef4444', '#22c55e', '#eab308'];
 const playerNames = ['蓝', '红', '绿', '黄'];
+const idModulo = 10_000_000;
+let nextServerPlayerId = 0;
+let nextServerBlockId = 0;
+let nextServerBombId = 0;
 
 function makeCell(): Cell {
-  return { block: null, item: Item.None, bombId: null, players: new Set() };
+  return {
+    block: null,
+    item: Item.None,
+    bombId: null,
+    players: new Set(),
+    lastBombRound: -1,
+    playerBucketCount: 1,
+  };
 }
 
 export function createGame(seed = Date.now() >>> 0, config: GameConfig = defaultConfig): GameState {
+  return createGeneratedGame(seed, config, 'server');
+}
+
+export function createCppGameSimGame(
+  seed = Date.now() >>> 0,
+  config: GameConfig = defaultConfig,
+): GameState {
+  return createGeneratedGame(seed, config, 'gamesim');
+}
+
+function createGeneratedGame(
+  seed: number,
+  config: GameConfig,
+  mode: 'server' | 'gamesim',
+): GameState {
   const rng = new Rng(seed);
+  const serverRng = mode === 'server' ? new ServerRng(seed) : undefined;
   const size = config.size;
   const cells: Cell[][] = Array.from({ length: size }, () =>
     Array.from({ length: size }, () => makeCell()),
@@ -264,7 +349,7 @@ export function createGame(seed = Date.now() >>> 0, config: GameConfig = default
 
   const mid = Math.floor(size / 2);
   const blockMeta = new Map<number, BlockMeta>();
-  let nextBlockId = 1;
+  let nextBlockId = mode === 'server' ? nextServerBlockId : 1;
 
   // --- 对齐 InitMap / IsCreateWall ---
   const isCreateWall = (i: number, j: number): boolean => {
@@ -272,13 +357,22 @@ export function createGame(seed = Date.now() >>> 0, config: GameConfig = default
     if (
       (i + j) % 2 !== 0 &&
       i >= 1 && i < size - 1 && j >= 1 && j < size - 1 &&
-      rng.probability() < config.wallRandom
+      probability() < config.wallRandom
     ) {
       return true; // 随机墙
     }
-    void mid;
+    if (
+      mode === 'server' &&
+      ((j === mid && (i === 0 || i === size - 1)) ||
+        (i === mid && (j === 0 || j === size - 1))) &&
+      probability() < config.wallRandom
+    ) {
+      return true; // 原服务端四条边中点的随机墙
+    }
     return false;
   };
+  const probability = (): number =>
+    serverRng?.probability.uniformInt(99) ?? rng.probability();
 
   const blockArr: Array<[number, number]> = [];
   for (let i = 0; i < size; i++) {
@@ -295,14 +389,17 @@ export function createGame(seed = Date.now() >>> 0, config: GameConfig = default
     }
   }
 
-  shuffle(blockArr, rng);
+  if (serverRng) serverRng.blockShuffle.shuffle(blockArr);
+  else shuffle(blockArr, rng);
   for (const [i, j] of blockArr) {
-    if (rng.probability() >= config.mudRandom) continue;
+    if (probability() >= config.mudRandom) continue;
     const id = nextBlockId++;
     cells[i][j].block = 'mud';
     let hidden = Item.None;
-    if (rng.probability() < config.potionProbability) {
-      hidden = potionBag[rng.int(potionBag.length)];
+    if (probability() < config.potionProbability) {
+      hidden = serverRng
+        ? potionBag[serverRng.potion.uniformInt(potionBag.length - 1)]
+        : potionBag[rng.int(potionBag.length)];
     }
     blockMeta.set(id, { id, x: i, y: j, removable: true, hiddenItem: hidden });
   }
@@ -314,14 +411,19 @@ export function createGame(seed = Date.now() >>> 0, config: GameConfig = default
     [size - 1, 0],
     [0, size - 1],
   ];
-  shuffle(birth, rng);
+  if (serverRng) serverRng.birthShuffle.shuffle(birth);
+  else shuffle(birth, rng);
 
   const players: PlayerState[] = [];
   for (let i = 0; i < config.playerNum && i < birth.length; i++) {
     const [x, y] = birth[i];
-    const p = makePlayer(i + 1, playerNames[i] ?? `P${i + 1}`, x, y, playerColors[i] ?? '#888', config);
+    const id = mode === 'server' ? nextServerPlayerId : i + 1;
+    if (mode === 'server') {
+      nextServerPlayerId = (nextServerPlayerId + 1) % idModulo;
+    }
+    const p = makePlayer(id, playerNames[i] ?? `P${id}`, x, y, playerColors[i] ?? '#888', config);
     players.push(p);
-    cells[x][y].players.add(p.id);
+    insertCellPlayer(cells[x][y], p.id);
   }
 
   const state: GameState = {
@@ -333,11 +435,30 @@ export function createGame(seed = Date.now() >>> 0, config: GameConfig = default
     cells,
     players,
     bombs: [],
-    nextBombId: 1,
+    nextBombId: mode === 'server' ? nextServerBombId : 1,
+    bombBucketCount: 1,
     rng,
+    serverRng,
+    acceptedActions: new Map(),
   };
+  if (mode === 'server') nextServerBlockId = nextBlockId % idModulo;
   (state as unknown as { blockMeta: Map<number, BlockMeta> }).blockMeta = blockMeta;
   return state;
+}
+
+export function synchronizeServerIdCounters(state: GameState): void {
+  if (!state.serverRng) return;
+  const nextId = (values: number[], fallback: number): number => {
+    if (values.length === 0) return fallback;
+    return (Math.max(...values) + 1) % idModulo;
+  };
+  nextServerPlayerId = nextId(
+    state.players.map((player) => player.id),
+    nextServerPlayerId,
+  );
+  const blockMeta = getBlockMeta(state);
+  nextServerBlockId = nextId([...blockMeta.keys()], nextServerBlockId);
+  nextServerBombId = state.nextBombId % idModulo;
 }
 
 function getBlockMeta(state: GameState): Map<number, BlockMeta> {
@@ -376,12 +497,21 @@ export function cloneGame(state: GameState, rngSalt = 0): GameState {
     over: state.over,
     winnerIds: [...state.winnerIds],
     cells: state.cells.map((row) =>
-      row.map((c) => ({ block: c.block, item: c.item, bombId: c.bombId, players: new Set(c.players) })),
+      row.map((c) => ({
+        block: c.block,
+        item: c.item,
+        bombId: c.bombId,
+        players: new Set(c.players),
+        lastBombRound: c.lastBombRound,
+        playerBucketCount: c.playerBucketCount,
+      })),
     ),
     players: state.players.map((p) => ({ ...p })),
     bombs: state.bombs.map((b) => ({ ...b })),
     nextBombId: state.nextBombId,
+    bombBucketCount: state.bombBucketCount,
     rng: state.rng.fork(rngSalt),
+    acceptedActions: new Map(state.acceptedActions),
   };
   const meta = getBlockMeta(state);
   const clonedMeta = new Map<number, BlockMeta>();
@@ -390,7 +520,10 @@ export function cloneGame(state: GameState, rngSalt = 0): GameState {
   return cloned;
 }
 
-export function serializeGameState(state: GameState): SerializedGameState {
+export function serializeGameState(
+  state: GameState,
+  includeServerRng = false,
+): SerializedGameState {
   return {
     config: { ...state.config },
     seed: state.seed,
@@ -398,17 +531,21 @@ export function serializeGameState(state: GameState): SerializedGameState {
     over: state.over,
     winnerIds: [...state.winnerIds],
     rngState: state.rng.snapshot(),
+    serverRngState: includeServerRng ? state.serverRng?.snapshot() : undefined,
     cells: state.cells.map((row) =>
       row.map((cell) => ({
         block: cell.block,
         item: cell.item,
         bombId: cell.bombId,
         players: [...cell.players],
+        lastBombRound: cell.lastBombRound,
+        playerBucketCount: cell.playerBucketCount,
       })),
     ),
     players: state.players.map((player) => ({ ...player })),
     bombs: state.bombs.map((bomb) => ({ ...bomb })),
     nextBombId: state.nextBombId,
+    bombBucketCount: state.bombBucketCount,
     blockMeta: [...getBlockMeta(state).values()].map((block) => ({ ...block })),
   };
 }
@@ -416,6 +553,12 @@ export function serializeGameState(state: GameState): SerializedGameState {
 export function deserializeGameState(source: SerializedGameState): GameState {
   const rng = new Rng(source.seed);
   rng.restore(source.rngState);
+  const serverRng = source.serverRngState
+    ? new ServerRng(source.seed)
+    : undefined;
+  if (serverRng && source.serverRngState) {
+    serverRng.restore(source.serverRngState);
+  }
   const state: GameState = {
     config: { ...source.config },
     seed: source.seed,
@@ -428,12 +571,18 @@ export function deserializeGameState(source: SerializedGameState): GameState {
         item: cell.item,
         bombId: cell.bombId,
         players: new Set(cell.players),
+        lastBombRound: cell.lastBombRound ?? -1,
+        playerBucketCount:
+          cell.playerBucketCount ?? inferBombBucketCount(cell.players.length),
       })),
     ),
     players: source.players.map((player) => ({ ...player })),
     bombs: source.bombs.map((bomb) => ({ ...bomb })),
     nextBombId: source.nextBombId,
+    bombBucketCount: source.bombBucketCount ?? inferBombBucketCount(source.bombs.length),
     rng,
+    serverRng,
+    acceptedActions: new Map(),
   };
   (state as unknown as { blockMeta: Map<number, BlockMeta> }).blockMeta = new Map(
     source.blockMeta.map((block) => [block.id, { ...block }]),
@@ -527,8 +676,14 @@ export function applyAction(state: GameState, playerId: number, action: Action, 
     const cell = state.cells[player.x][player.y];
     if (cell.bombId != null || cell.block != null) return;
     const id = state.nextBombId++;
-    const extra = state.rng.int(state.config.bombRandom + 1); // rand(0..bombRandom)
-    state.bombs.push({
+    if (state.serverRng) {
+      state.nextBombId %= idModulo;
+      nextServerBombId = state.nextBombId;
+    }
+    const extra = state.serverRng
+      ? state.serverRng.bomb.uniformInt(state.config.bombRandom)
+      : state.rng.int(state.config.bombRandom + 1);
+    insertServerBomb(state, {
       id,
       x: player.x,
       y: player.y,
@@ -565,7 +720,7 @@ export function applyAction(state: GameState, playerId: number, action: Action, 
   state.cells[player.x][player.y].players.delete(player.id);
   player.x = nx;
   player.y = ny;
-  dst.players.add(player.id);
+  insertCellPlayer(dst, player.id);
 
   // 相遇（无敌碰撞伤害）
   for (const otherId of [...dst.players]) {
@@ -670,30 +825,23 @@ export function runRound(state: GameState, bots: Map<number, BotController>, hum
         action =
           bot?.chooseAction(planningState, player.id, sub) ?? Action.Silent;
       }
-      actions.push(action);
+      if (action !== Action.Silent) actions.push(action);
       simulateClientAction(planningState, player.id, action);
     }
     actionBatches.set(player.id, actions);
   }
 
-  // 同步评估路径保留确定性的交错顺序。网页运行时使用独立 Web Worker，
-  // 通过 applyActionBatch 按真实返回顺序模拟服务端收包。
+  // 同步评估路径按完整客户端批次执行，并逐回合轮换先到者。网页运行时
+  // 使用独立 Web Worker，通过 applyActionBatch 按真实返回顺序收包。
   const order = state.players.map((player) => player.id);
   if ((state.round + 1) & 1) order.reverse();
-  const maxSteps = Math.max(
-    1,
-    ...state.players.map(
-      (player) => actionBatches.get(player.id)?.length ?? 0,
-    ),
-  );
-  for (let sub = 0; sub < maxSteps; sub++) {
-    for (const playerId of order) {
-      const player = state.players.find((candidate) => candidate.id === playerId);
-      if (!player?.alive) continue;
-      const action = actionBatches.get(playerId)?.[sub];
-      if (action == null) continue;
-      applyAction(state, playerId, action, events);
-    }
+  for (const playerId of order) {
+    applyActionBatch(
+      state,
+      playerId,
+      actionBatches.get(playerId) ?? [],
+      events,
+    );
   }
 
   flushRound(state, events);
@@ -709,9 +857,14 @@ export function applyActionBatch(
   if (state.over) return;
   const player = state.players.find((candidate) => candidate.id === playerId);
   if (!player?.alive) return;
-  const accepted = actions.slice(0, Math.max(0, player.speed));
+  const used = state.acceptedActions?.get(playerId) ?? 0;
+  const accepted = actions.slice(0, Math.max(0, player.speed - used));
   for (const action of accepted) {
     if (!player.alive) break;
+    state.acceptedActions?.set(
+      playerId,
+      (state.acceptedActions.get(playerId) ?? 0) + 1,
+    );
     applyAction(state, playerId, action, events);
     cleanDeadPlayers(state);
   }
@@ -726,6 +879,7 @@ export function flushRound(
   flushBombMove(state, events);
   flushBombExplode(state, events);
   flushPlayers(state);
+  state.acceptedActions?.clear();
   events.push({ kind: 'round', text: `第 ${state.round} 回合` });
   checkGameOver(state, events);
 }
@@ -763,7 +917,7 @@ export function simulateClientAction(
   state.cells[player.x][player.y].players.delete(player.id);
   player.x = x;
   player.y = y;
-  target.players.add(player.id);
+  insertCellPlayer(target, player.id);
   if (target.item === Item.None) return;
   switch (target.item) {
     case Item.BombNum:
@@ -789,6 +943,104 @@ export function simulateClientAction(
       break;
   }
   target.item = Item.None;
+}
+
+function insertServerBomb(state: GameState, bomb: BombState): void {
+  let bucketCount = state.bombBucketCount;
+  if (bucketCount === 1 || state.bombs.length + 1 >= bucketCount) {
+    bucketCount = nextGcc8BucketCount(bucketCount);
+    reorderForGcc8Rehash(state.bombs, bucketCount);
+    state.bombBucketCount = bucketCount;
+  }
+  const bucket = positiveModulo(bomb.id, bucketCount);
+  const sameBucketIndex = state.bombs.findIndex(
+    (existing) => positiveModulo(existing.id, bucketCount) === bucket,
+  );
+  state.bombs.splice(sameBucketIndex < 0 ? 0 : sameBucketIndex, 0, bomb);
+}
+
+function reorderForGcc8Rehash<T extends { id: number }>(
+  values: T[],
+  bucketCount: number,
+): void {
+  const groups = new Map<number, T[]>();
+  const firstSeen: number[] = [];
+  for (const value of values) {
+    const bucket = positiveModulo(value.id, bucketCount);
+    let group = groups.get(bucket);
+    if (!group) {
+      group = [];
+      groups.set(bucket, group);
+      firstSeen.push(bucket);
+    }
+    group.unshift(value);
+  }
+  values.splice(
+    0,
+    values.length,
+    ...firstSeen
+      .toReversed()
+      .flatMap((bucket) => groups.get(bucket) ?? []),
+  );
+}
+
+function nextGcc8BucketCount(current: number): number {
+  const bucketCounts = [3, 7, 17, 37, 79, 167, 337, 709, 1493, 3209];
+  return bucketCounts.find((candidate) => candidate > current) ?? current * 2 + 1;
+}
+
+function inferBombBucketCount(elementCount: number): number {
+  let bucketCount = 1;
+  let elements = 0;
+  while (elements < elementCount) {
+    if (bucketCount === 1 || elements + 1 >= bucketCount) {
+      bucketCount = nextGcc8BucketCount(bucketCount);
+    }
+    elements++;
+  }
+  return bucketCount;
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function insertCellPlayer(cell: Cell, playerId: number): void {
+  if (cell.players.has(playerId)) return;
+  let bucketCount = cell.playerBucketCount;
+  let ordered = [...cell.players];
+  if (bucketCount === 1 || ordered.length + 1 >= bucketCount) {
+    bucketCount = nextGcc8BucketCount(bucketCount);
+    ordered = reorderGcc8IdsForRehash(ordered, bucketCount);
+    cell.playerBucketCount = bucketCount;
+  }
+  const bucket = positiveModulo(playerId, bucketCount);
+  const sameBucketIndex = ordered.findIndex(
+    (id) => positiveModulo(id, bucketCount) === bucket,
+  );
+  ordered.splice(sameBucketIndex < 0 ? 0 : sameBucketIndex, 0, playerId);
+  cell.players = new Set(ordered);
+}
+
+function reorderGcc8IdsForRehash(
+  ids: number[],
+  bucketCount: number,
+): number[] {
+  const groups = new Map<number, number[]>();
+  const firstSeen: number[] = [];
+  for (const id of ids) {
+    const bucket = positiveModulo(id, bucketCount);
+    let group = groups.get(bucket);
+    if (!group) {
+      group = [];
+      groups.set(bucket, group);
+      firstSeen.push(bucket);
+    }
+    group.unshift(id);
+  }
+  return firstSeen
+    .toReversed()
+    .flatMap((bucket) => groups.get(bucket) ?? []);
 }
 
 // --- 对齐 FlushBombMove（手套推动的炸弹逐格移动）---
@@ -853,6 +1105,7 @@ function flushBombExplode(state: GameState, events: StepEvent[]): void {
 
     const explodeCell = (x: number, y: number): boolean => {
       const area = state.cells[x][y];
+      area.lastBombRound = state.round;
       // 炸人
       for (const pid of [...area.players]) {
         const victim = state.players.find((p) => p.id === pid);
@@ -920,8 +1173,6 @@ function cleanDeadPlayers(state: GameState): void {
   for (const p of state.players) {
     if (!p.alive && p.x >= 0) {
       state.cells[p.x][p.y].players.delete(p.id);
-      p.x = -1;
-      p.y = -1;
     }
   }
 }
@@ -949,7 +1200,9 @@ export function checkGameOver(state: GameState, events: StepEvent[] = []): void 
   // 最高分胜者（并列保留）
   let top = -Infinity;
   let markWinners: number[] = [];
-  for (const p of state.players) {
+  for (const playerId of gcc8PlayerIterationOrder(state)) {
+    const p = state.players.find((player) => player.id === playerId);
+    if (!p) continue;
     if (p.score > top) {
       top = p.score;
       markWinners = [p.id];
@@ -968,6 +1221,27 @@ export function checkGameOver(state: GameState, events: StepEvent[] = []): void 
     state.winnerIds = markWinners;
     events.push({ kind: 'gameover', text: '对局结束' });
   }
+}
+
+function gcc8PlayerIterationOrder(state: GameState): number[] {
+  const ordered: Array<{ id: number }> = [];
+  let bucketCount = 1;
+  for (const player of state.players) {
+    if (bucketCount === 1 || ordered.length + 1 >= bucketCount) {
+      bucketCount = nextGcc8BucketCount(bucketCount);
+      reorderForGcc8Rehash(ordered, bucketCount);
+    }
+    const bucket = positiveModulo(player.id, bucketCount);
+    const sameBucketIndex = ordered.findIndex(
+      (item) => positiveModulo(item.id, bucketCount) === bucket,
+    );
+    ordered.splice(
+      sameBucketIndex < 0 ? 0 : sameBucketIndex,
+      0,
+      { id: player.id },
+    );
+  }
+  return ordered.map((item) => item.id);
 }
 
 export function scoreState(state: GameState, selfId: number): number {

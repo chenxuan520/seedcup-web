@@ -5,9 +5,11 @@ function play(makeP1: () => BotController, makeP2: () => BotController, seed: nu
   const state = createGame(seed);
   const p1 = makeP1();
   const p2 = makeP2();
+  const p1Id = state.players[0].id;
+  const p2Id = state.players[1].id;
   const bots = new Map<number, BotController>([
-    [1, p1],
-    [2, p2],
+    [p1Id, p1],
+    [p2Id, p2],
   ]);
   for (const [id, b] of bots) b.reset?.(id, state);
   const start = state.players.map((p) => `(${p.x},${p.y})`);
@@ -73,7 +75,7 @@ for (const s of seeds) {
 
 console.log('=== 搜索 vs 困难 ===');
 for (const s of [42, 20260730, 999]) {
-  const r = play(() => new SearchBot(6, 2, 900), () => new RuleBot(true, 4), s);
+  const r = play(() => new SearchBot(6, 2, 0.05), () => new RuleBot(true, 4), s);
   const bad = r.moves1 < 3 || r.moves2 < 3;
   if (bad) fail++;
   console.log(

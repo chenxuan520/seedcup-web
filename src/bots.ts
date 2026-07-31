@@ -1,16 +1,18 @@
 import {
   Action,
   Item,
-  actionLegal,
-  applyAction,
   cloneGame,
   inBounds,
-  runRound,
-  scoreState,
+  simulateClientAction,
 } from './engine';
 import type { BotController, GameState, PlayerState } from './engine';
 import type { PureNnPolicy } from './rnn';
 import { CppMt19937 } from './cpp-random';
+import {
+  cppRolloutScore,
+  createCppRolloutState,
+  stepCppRollout,
+} from './cpp-game-sim';
 
 // ---------------------------------------------------------------------------
 // 规则 bot：严格移植自 C++ 原版 src/bot.h（SignDangerous / GetMaxMarkOper /
@@ -92,13 +94,17 @@ export class RuleBot implements BotController {
   ];
   private selfInit: [number, number] = [-1, -1];
   private enemyInit: [number, number] = [-1, -1];
-  private moveShuffleRng = new CppMt19937();
+  private moveShuffleRng: CppMt19937;
+  private readonly ownsMoveShuffleRng: boolean;
 
   constructor(
     readonly hard = false,
     readonly orderMode = 0,
+    moveShuffleRng?: CppMt19937,
   ) {
     this.label = hard ? '困难 (hard)' : '简单 (easy)';
+    this.ownsMoveShuffleRng = moveShuffleRng == null;
+    this.moveShuffleRng = moveShuffleRng ?? new CppMt19937();
   }
 
   reset(playerId?: number, state?: GameState): void {
@@ -112,9 +118,19 @@ export class RuleBot implements BotController {
       [1, 0],
       [-1, 0],
     ];
-    this.moveShuffleRng = new CppMt19937();
+    if (this.ownsMoveShuffleRng) {
+      this.moveShuffleRng = new CppMt19937();
+    }
     void playerId;
     void state;
+  }
+
+  setInitialPositions(
+    self: [number, number],
+    enemy: [number, number],
+  ): void {
+    this.selfInit = [...self];
+    this.enemyInit = [...enemy];
   }
 
 
@@ -219,8 +235,27 @@ export class RuleBot implements BotController {
     state: GameState,
     player: PlayerState,
   ): number {
+    const strict = this.escapeDangerousAreaImpl(
+      state,
+      player,
+      !this.hard,
+    );
+    if (strict !== 0 || this.hard) return strict;
+    return this.escapeDangerousAreaImpl(state, player, false);
+  }
+
+  private escapeDangerousAreaImpl(
+    state: GameState,
+    player: PlayerState,
+    avoidBombCapableOpponent: boolean,
+  ): number {
     const pass = Array.from({ length: this.size }, () => Array.from({ length: this.size }, () => 0));
     const queue: Array<[number, number, number]> = [[player.x, player.y, 0]];
+    const startInBombDanger = this.isBombDangerAt(
+      state,
+      player.x,
+      player.y,
+    );
     pass[player.x][player.y] = 1;
     while (queue.length) {
       const [cx, cy, oper] = queue.shift()!;
@@ -231,7 +266,20 @@ export class RuleBot implements BotController {
         if (!this.correctPos(x, y)) continue;
         if (pass[x][y]) continue;
         if (state.cells[x][y].block != null || state.cells[x][y].bombId != null) continue;
-        if (!this.hard && this.hasBombCapableOpponentAt(state, player.id, x, y)) continue;
+        if (
+          avoidBombCapableOpponent &&
+          this.hasBombCapableOpponentAt(state, player.id, x, y)
+        ) {
+          continue;
+        }
+        if (
+          !this.hard &&
+          oper === 0 &&
+          !startInBombDanger &&
+          this.isBombDangerAt(state, x, y)
+        ) {
+          continue;
+        }
         if (this.areaMark[x][y] < 0) {
           pass[x][y] = 1;
           queue.push([x, y, operLast]);
@@ -242,6 +290,32 @@ export class RuleBot implements BotController {
     }
     if (this.hard && player.gloves) return this.getClosestMoveBomb(state, player);
     return 0; // 等死
+  }
+
+  private isBombDangerAt(
+    state: GameState,
+    x: number,
+    y: number,
+  ): boolean {
+    for (const bomb of state.bombs) {
+      if (bomb.x === x && bomb.y === y) return true;
+      if (bomb.x !== x && bomb.y !== y) continue;
+      const distance = Math.abs(bomb.x - x) + Math.abs(bomb.y - y);
+      if (distance > bomb.range) continue;
+      const dx = x === bomb.x ? 0 : x > bomb.x ? 1 : -1;
+      const dy = y === bomb.y ? 0 : y > bomb.y ? 1 : -1;
+      let blocked = false;
+      for (let step = 1; step <= distance; step++) {
+        const nowX = bomb.x + dx * step;
+        const nowY = bomb.y + dy * step;
+        if (state.cells[nowX][nowY].block != null) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) return true;
+    }
+    return false;
   }
 
   // --- C++ GetClosestMoveBomb（手套推炸弹）---
@@ -618,32 +692,288 @@ function countOtherPlayers(state: GameState, x: number, y: number, selfId: numbe
 
 export class SearchBot extends RuleBot {
   readonly label: string = '搜索增强';
+  private lastSearchDecision: {
+    baseline: Action;
+    chosen: Action;
+    scores: number[];
+    priors: number[];
+    bombFirstSeen: Array<[number, number]>;
+  } | null = null;
+  protected readonly searchDepth: number;
+  protected readonly searchRollouts: number;
+  protected readonly minRuleGap: number;
+  protected readonly policyPriorWeight: number;
+  protected readonly policy: PureNnPolicy | null;
+  private searchSelfInit: [number, number] | null = null;
+  private searchEnemyInit: [number, number] | null = null;
+  private readonly bombFirstSeenRound = new Map<number, number>();
+  private readonly searchMoveRng: CppMt19937;
 
   constructor(
-    private readonly depth = 6,
-    private readonly rollouts = 2,
-    private readonly minGap = 900,
+    depth = 6,
+    rollouts = 2,
+    minRuleGap = 0.05,
+    policy: PureNnPolicy | null = null,
+    policyPriorWeight = 0,
   ) {
-    super(true, 4);
+    const searchMoveRng = new CppMt19937();
+    super(true, 4, searchMoveRng);
+    this.searchMoveRng = searchMoveRng;
+    this.searchDepth = depth;
+    this.searchRollouts = rollouts;
+    this.minRuleGap = minRuleGap;
+    this.policy = policy;
+    this.policyPriorWeight = policyPriorWeight;
   }
 
-  chooseAction(state: GameState, playerId: number): Action {
+  override reset(playerId: number, state: GameState): void {
+    super.reset(playerId, state);
+    const self = state.players.find((player) => player.id === playerId);
+    const enemy = state.players.find((player) => player.id !== playerId);
+    this.searchSelfInit = self ? [self.x, self.y] : null;
+    this.searchEnemyInit = enemy ? [enemy.x, enemy.y] : null;
+    this.bombFirstSeenRound.clear();
+    this.policy?.reset();
+  }
+
+  override chooseAction(
+    state: GameState,
+    playerId: number,
+    sub = 0,
+  ): Action {
     const baseline = super.chooseAction(state, playerId);
     const player = state.players.find((p) => p.id === playerId);
     if (!player || !player.alive) return baseline;
+    if (!this.searchSelfInit) this.searchSelfInit = [player.x, player.y];
+    const enemy = state.players.find((candidate) => candidate.id !== playerId);
+    if (!this.searchEnemyInit && enemy) {
+      this.searchEnemyInit = [enemy.x, enemy.y];
+    }
+    const inDanger = buildDlAreaMark(state, player)[player.x][player.y];
+    let policyProbabilities: number[] | null = null;
+    if (this.policy) {
+      policyProbabilities = this.policy.predict(
+        state,
+        playerId,
+        this.searchSelfInit,
+        this.searchEnemyInit ?? [enemy?.x ?? 0, enemy?.y ?? 0],
+        sub,
+      );
+    }
+    if (inDanger) {
+      this.policy?.commit(baseline, true);
+      this.lastSearchDecision = {
+        baseline,
+        chosen: baseline,
+        scores: [],
+        priors: policyProbabilities ?? [],
+        bombFirstSeen: [...this.bombFirstSeenRound],
+      };
+      return baseline;
+    }
 
-    const baseScore = rolloutActionScore(state, playerId, baseline, this.depth, this.rollouts);
+    this.updateBombTracker(state);
+    const scores = OPER_TO_ACTION.map((action) =>
+      this.scoreOper(state, playerId, action),
+    );
     let best = baseline;
-    let bestScore = baseScore;
+    let bestScore = scores[baseline];
+    let bestAdjusted =
+      bestScore +
+      this.policyPriorWeight * (policyProbabilities?.[baseline] ?? 0);
     for (const action of OPER_TO_ACTION) {
-      if (!actionLegal(state, player, action, false)) continue;
-      const score = rolloutActionScore(state, playerId, action, this.depth, this.rollouts);
-      if (score > bestScore) {
+      const score = scores[action];
+      const adjusted =
+        score +
+        this.policyPriorWeight * (policyProbabilities?.[action] ?? 0);
+      if (adjusted > bestAdjusted) {
         bestScore = score;
+        bestAdjusted = adjusted;
         best = action;
       }
     }
-    return best !== baseline && bestScore - baseScore >= this.minGap ? best : baseline;
+    const chosen =
+      best !== baseline &&
+      bestScore - scores[baseline] >= this.minRuleGap
+        ? best
+        : baseline;
+    this.lastSearchDecision = {
+      baseline,
+      chosen,
+      scores,
+      priors: policyProbabilities ?? [],
+      bombFirstSeen: [...this.bombFirstSeenRound],
+    };
+    this.policy?.commit(chosen, false);
+    return chosen;
+  }
+
+  debugDecision(): {
+    baseline: Action;
+    chosen: Action;
+    scores: number[];
+    priors: number[];
+    bombFirstSeen: Array<[number, number]>;
+  } | null {
+    if (!this.lastSearchDecision) return null;
+    return {
+      baseline: this.lastSearchDecision.baseline,
+      chosen: this.lastSearchDecision.chosen,
+      scores: [...this.lastSearchDecision.scores],
+      priors: [...this.lastSearchDecision.priors],
+      bombFirstSeen: this.lastSearchDecision.bombFirstSeen.map(
+        ([bombId, round]) => [bombId, round],
+      ),
+    };
+  }
+
+  debugScoreOper(
+    state: GameState,
+    playerId: number,
+    action: Action,
+    rolloutDepth = this.searchDepth,
+    rollouts = this.searchRollouts,
+  ): number {
+    return this.scoreOper(
+      state,
+      playerId,
+      action,
+      rolloutDepth,
+      rollouts,
+    );
+  }
+
+  private scoreOper(
+    state: GameState,
+    playerId: number,
+    action: Action,
+    rolloutDepth = this.searchDepth,
+    rollouts = this.searchRollouts,
+  ): number {
+    const player = state.players.find((candidate) => candidate.id === playerId);
+    if (!player || !isPureNnActionLegal(state, player, action)) return -1;
+
+    let total = 0;
+    const moveRngSnapshot = this.searchMoveRng.snapshot();
+    for (let rollout = 0; rollout < rollouts; rollout++) {
+      const bombTimeLeft = new Map<number, number>();
+      for (const bomb of state.bombs) {
+        const firstSeen =
+          this.bombFirstSeenRound.get(bomb.id) ?? state.round;
+        const age = state.round - firstSeen;
+        bombTimeLeft.set(
+          bomb.id,
+          Math.max(1, state.config.bombTime - age),
+        );
+      }
+      const seed =
+        (0xdeadbeef +
+          Math.imul(rollout, 1315423911) +
+          Math.imul(action, 2654435761)) >>>
+        0;
+      const sim = createCppRolloutState(
+        state,
+        bombTimeLeft,
+        seed,
+        state.round + rolloutDepth + 2,
+      );
+      const opponent = sim.players.find(
+        (candidate) => candidate.id !== playerId,
+      );
+      if (!opponent) continue;
+      const ruleSelf = new RuleBot(true, 4, this.searchMoveRng);
+      const ruleOpponent = new RuleBot(true, 0, this.searchMoveRng);
+      ruleSelf.reset(playerId, sim);
+      ruleOpponent.reset(opponent.id, sim);
+      ruleSelf.setInitialPositions(
+        this.searchSelfInit ?? [player.x, player.y],
+        this.searchEnemyInit ?? [opponent.x, opponent.y],
+      );
+
+      const firstActions = new Map<number, Action[]>();
+      const planningSelf = cloneGame(sim, 0);
+      const selfInSim = planningSelf.players.find(
+        (candidate) => candidate.id === playerId,
+      );
+      const selfActions: Action[] = [];
+      if (action !== Action.Silent) selfActions.push(action);
+      if (action !== Action.Silent) {
+        simulateClientAction(planningSelf, playerId, action);
+      }
+      const selfSpeed = selfInSim?.speed ?? 0;
+      for (let sub = 1; sub < selfSpeed; sub++) {
+        const next = ruleSelf.chooseAction(planningSelf, playerId);
+        if (next !== Action.Silent) selfActions.push(next);
+        simulateClientAction(planningSelf, playerId, next);
+      }
+
+      const planningOpponent = cloneGame(sim, opponent.id);
+      const opponentActions: Action[] = [];
+      for (let sub = 0; sub < opponent.speed; sub++) {
+        const next = ruleOpponent.chooseAction(
+          planningOpponent,
+          opponent.id,
+        );
+        if (next !== Action.Silent) opponentActions.push(next);
+        simulateClientAction(planningOpponent, opponent.id, next);
+      }
+      firstActions.set(playerId, selfActions);
+      firstActions.set(opponent.id, opponentActions);
+      stepCppRollout(sim, firstActions);
+
+      for (
+        let depth = 1;
+        depth < rolloutDepth && !sim.over;
+        depth++
+      ) {
+        const actions = new Map<number, Action[]>();
+        const selfView = cloneGame(sim, playerId);
+        const opponentView = cloneGame(sim, opponent.id);
+        const simSelf = sim.players.find(
+          (candidate) => candidate.id === playerId,
+        );
+        const simOpponent = sim.players.find(
+          (candidate) => candidate.id === opponent.id,
+        );
+        const nextSelf: Action[] = [];
+        for (let sub = 0; sub < (simSelf?.speed ?? 0); sub++) {
+          const next = ruleSelf.chooseAction(selfView, playerId);
+          if (next !== Action.Silent) nextSelf.push(next);
+          simulateClientAction(selfView, playerId, next);
+        }
+        const nextOpponent: Action[] = [];
+        for (let sub = 0; sub < (simOpponent?.speed ?? 0); sub++) {
+          const next = ruleOpponent.chooseAction(
+            opponentView,
+            opponent.id,
+          );
+          if (next !== Action.Silent) nextOpponent.push(next);
+          simulateClientAction(opponentView, opponent.id, next);
+        }
+        actions.set(playerId, nextSelf);
+        actions.set(opponent.id, nextOpponent);
+        stepCppRollout(sim, actions);
+      }
+      total += cppRolloutScore(sim, playerId);
+    }
+    this.searchMoveRng.restore(moveRngSnapshot);
+
+    const raw = total / rollouts;
+    let normalized = 0.5 + Math.max(-0.5, Math.min(0.5, raw / 40000));
+    if (action === Action.Silent) normalized -= 0.3;
+    return Math.max(0, Math.min(1, normalized));
+  }
+
+  private updateBombTracker(state: GameState): void {
+    const active = new Set(state.bombs.map((bomb) => bomb.id));
+    for (const bomb of state.bombs) {
+      if (!this.bombFirstSeenRound.has(bomb.id)) {
+        this.bombFirstSeenRound.set(bomb.id, state.round);
+      }
+    }
+    for (const id of this.bombFirstSeenRound.keys()) {
+      if (!active.has(id)) this.bombFirstSeenRound.delete(id);
+    }
   }
 }
 
@@ -778,7 +1108,7 @@ function canPlaceBombForNn(
   return false;
 }
 
-function isPureNnActionLegal(
+export function isPureNnActionLegal(
   state: GameState,
   player: PlayerState,
   action: Action,
@@ -814,44 +1144,9 @@ function isPureNnActionLegal(
 export class HybridSearchBot extends SearchBot {
   readonly label = 'NN + 搜索';
 
-  constructor(private readonly policy: PureNnPolicy | null) {
-    super(6, 2, 900);
+  constructor(policy: PureNnPolicy | null) {
+    super(6, 2, 0.05, policy, 0.005);
   }
-
-  chooseAction(state: GameState, playerId: number): Action {
-    const baseline = super.chooseAction(state, playerId);
-    const player = state.players.find((p) => p.id === playerId && p.alive);
-    if (!player || !this.policy) return baseline;
-    const enemy = state.players.find((p) => p.id !== playerId && p.alive);
-    const probs = this.policy.predict(state, playerId, [player.x, player.y], [enemy?.x ?? 0, enemy?.y ?? 0]);
-    let best = baseline;
-    let bestScore = rolloutActionScore(state, playerId, baseline, 6, 2) + 90 * (probs[baseline] ?? 0);
-    for (const action of OPER_TO_ACTION) {
-      if (!actionLegal(state, player, action, false)) continue;
-      const score = rolloutActionScore(state, playerId, action, 6, 2) + 90 * (probs[action] ?? 0);
-      if (score > bestScore) {
-        bestScore = score;
-        best = action;
-      }
-    }
-    return best;
-  }
-}
-
-function rolloutActionScore(state: GameState, playerId: number, action: Action, depth: number, repeats: number): number {
-  let total = 0;
-  for (let i = 0; i < repeats; i++) {
-    const sim = cloneGame(state, i * 131 + action);
-    applyAction(sim, playerId, action);
-    const bots = new Map<number, BotController>();
-    for (const p of sim.players) bots.set(p.id, new RuleBot(true, 4));
-    for (const [id, bot] of bots) bot.reset?.(id, sim);
-    for (let d = 0; d < depth && !sim.over; d++) {
-      runRound(sim, bots);
-    }
-    total += scoreState(sim, playerId);
-  }
-  return total / repeats;
 }
 
 export { inBounds };

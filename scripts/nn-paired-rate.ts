@@ -15,8 +15,10 @@ function play(seed: number, nnFirst: boolean): number {
   const policy = loadPureNnPolicyFromText(modelText);
   const nn = new PureNnBot(policy);
   const easy = new RuleBot(false, 0);
-  const nnId = nnFirst ? 1 : 2;
-  const easyId = nnFirst ? 2 : 1;
+  const firstId = state.players[0].id;
+  const secondId = state.players[1].id;
+  const nnId = nnFirst ? firstId : secondId;
+  const easyId = nnFirst ? secondId : firstId;
   const bots = new Map<number, BotController>([
     [nnId, nn],
     [easyId, easy],

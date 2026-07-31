@@ -6,12 +6,14 @@ import {
   type Cell,
   Item,
   Rng,
+  ServerRng,
   applyActionBatch,
   createGame,
   dangerInfo,
   defaultConfig,
   flushRound,
   serializeGameState,
+  synchronizeServerIdCounters,
   type BotController,
   type GameState,
   type SerializedGameState,
@@ -342,7 +344,7 @@ const seatColors = ['#3b82f6', '#ef4444', '#22c55e', '#eab308'];
 const seatNames = ['蓝', '红', '绿', '黄'];
 
 let nnPolicy: PureNnPolicy | null = null;
-let state: GameState = createGame(1);
+let state: GameState;
 let bots = new Map<number, BotController>();
 let running = false;
 let timer: number | null = null;
@@ -506,7 +508,7 @@ function makeBot(id: string): BotController {
     case 'manual': return new ManualBot();
     case 'easy': return new RuleBot(false, 0);
     case 'hard': return new RuleBot(true, 4);
-    case 'search': return new SearchBot(6, 2, 900);
+    case 'search': return new SearchBot(6, 2, 0.05);
     case 'nn': return new PureNnBot(nnPolicy);
     case 'hybrid': return new HybridSearchBot(nnPolicy);
     default: return new RuleBot(true, 4);
@@ -616,10 +618,21 @@ interface ExportedMatch {
     over: boolean;
     winnerIds: number[];
     rngState: SerializedGameState['rngState'];
-    cells: Array<Array<{ block: string | null; item: number; bombId: number | null; players: number[] }>>;
+    serverRngState?: SerializedGameState['serverRngState'];
+    cells: Array<
+      Array<{
+        block: string | null;
+        item: number;
+        bombId: number | null;
+        players: number[];
+        lastBombRound?: number;
+        playerBucketCount?: number;
+      }>
+    >;
     players: GameState['players'];
     bombs: GameState['bombs'];
     nextBombId: number;
+    bombBucketCount?: number;
     blockMeta: Array<BlockMeta>;
   };
 }
@@ -645,17 +658,21 @@ function exportMatch(): void {
       over: state.over,
       winnerIds: [...state.winnerIds],
       rngState: state.rng.snapshot(),
+      serverRngState: state.serverRng?.snapshot(),
       cells: state.cells.map((row) =>
         row.map((cell) => ({
           block: cell.block,
           item: cell.item,
           bombId: cell.bombId,
           players: [...cell.players],
+          lastBombRound: cell.lastBombRound,
+          playerBucketCount: cell.playerBucketCount,
         })),
       ),
       players: state.players.map((player) => ({ ...player })),
       bombs: state.bombs.map((bomb) => ({ ...bomb })),
       nextBombId: state.nextBombId,
+      bombBucketCount: state.bombBucketCount,
       blockMeta: [...blockMetaOf(state).values()].map((block) => ({ ...block })),
     },
   };
@@ -713,6 +730,8 @@ function importMatch(payload: ExportedMatch): void {
         item: cell.item as Item,
         bombId: cell.bombId,
         players: new Set(cell.players),
+        lastBombRound: cell.lastBombRound ?? -1,
+        playerBucketCount: cell.playerBucketCount ?? 1,
       })),
     ),
     players: payload.state.players.map((player) => ({ ...player })),
@@ -721,12 +740,19 @@ function importMatch(payload: ExportedMatch): void {
       status: bomb.status as BombStatus,
     })),
     nextBombId: payload.state.nextBombId,
+    bombBucketCount: payload.state.bombBucketCount ?? 1,
     rng: new Rng(payload.state.seed),
+    acceptedActions: new Map(),
   };
   restored.rng.restore(payload.state.rngState);
+  if (payload.state.serverRngState) {
+    restored.serverRng = new ServerRng(payload.state.seed);
+    restored.serverRng.restore(payload.state.serverRngState);
+  }
   (restored as unknown as { blockMeta: Map<number, BlockMeta> }).blockMeta = new Map(
     payload.state.blockMeta.map((block) => [block.id, { ...block }]),
   );
+  synchronizeServerIdCounters(restored);
   state = restored;
   bots = new Map();
   const seats = seatBotIds();
@@ -815,6 +841,8 @@ async function stepGame(): Promise<void> {
       }),
     ]);
     if (generation !== workerGeneration) return;
+    // Close this round before flushing so late Worker replies cannot mutate
+    // the next round after the deadline has passed.
     activeRoundToken++;
     flushRound(state, events);
   } finally {

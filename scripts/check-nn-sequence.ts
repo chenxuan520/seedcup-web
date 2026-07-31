@@ -7,6 +7,7 @@ import {
   type GameState,
 } from '../src/engine';
 import { loadPureNnPolicyFromText } from '../src/rnn';
+import { isPureNnActionLegal } from '../src/bots';
 
 interface FixtureMessage {
   player_id: number;
@@ -93,6 +94,7 @@ let probabilityErrorStep = -1;
 let maxHistoryError = 0;
 let historyErrorStep = -1;
 let actionMismatches = 0;
+let chosenActionMismatches = 0;
 const groupMaximums = new Map<string, { error: number; step: number }>();
 const groupDetails = new Map<
   string,
@@ -139,6 +141,18 @@ for (let index = 0; index < fixture.steps.length; index++) {
   const self = state.players.find(
     (player) => player.id === step.msg.player_id,
   );
+  const chosenAction = self
+    ? probabilities
+        .map((probability, action) => ({
+          probability,
+          action: action as Action,
+        }))
+        .sort((left, right) => right.probability - left.probability)
+        .find((candidate) =>
+          isPureNnActionLegal(state, self, candidate.action),
+        )?.action ?? Action.Silent
+    : Action.Silent;
+  if (chosenAction !== step.action_idx) chosenActionMismatches++;
   const inDanger = self ? isDangerous(state, self.x, self.y) : false;
   policy.commit(step.action_idx, inDanger);
 }
@@ -151,6 +165,7 @@ console.log(
   `probability_max_error=${maxProbabilityError} step=${probabilityErrorStep}`,
 );
 console.log(`top_action_mismatches=${actionMismatches}`);
+console.log(`chosen_action_mismatches=${chosenActionMismatches}`);
 for (const [name, value] of groupMaximums) {
   const detail = groupDetails.get(name);
   console.log(
@@ -165,6 +180,7 @@ if (
   maxHistoryError > 1e-12 ||
   maxProbabilityError > 1e-9 ||
   actionMismatches !== 0 ||
+  chosenActionMismatches !== 0 ||
   [...groupMaximums.values()].some((value) => value.error > 1e-12)
 ) {
   process.exit(1);

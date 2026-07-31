@@ -3,6 +3,11 @@ export interface CppMt19937Snapshot {
   index: number;
 }
 
+export interface CppMt19937_64Snapshot {
+  state: string[];
+  index: number;
+}
+
 export class CppMt19937 {
   private readonly state = new Uint32Array(624);
   private index = 624;
@@ -102,6 +107,98 @@ export class CppMt19937 {
         this.state[(index + 397) % this.state.length] ^ (value >>> 1);
       if (value & 1) twisted ^= 0x9908b0df;
       this.state[index] = twisted >>> 0;
+    }
+    this.index = 0;
+  }
+}
+
+const uint64Mask = (1n << 64n) - 1n;
+
+export class CppMt19937_64 {
+  private readonly state = Array.from({ length: 312 }, () => 0n);
+  private index = 312;
+
+  constructor(seed: number | bigint) {
+    this.seed(BigInt(seed));
+  }
+
+  nextUint64(): bigint {
+    if (this.index >= this.state.length) this.twist();
+    let value = this.state[this.index++];
+    value ^= (value >> 29n) & 0x5555555555555555n;
+    value ^= (value << 17n) & 0x71d67fffeda60000n;
+    value ^= (value << 37n) & 0xfff7eee000000000n;
+    value ^= value >> 43n;
+    return value & uint64Mask;
+  }
+
+  uniformInt(maxInclusive: number): number {
+    if (!Number.isInteger(maxInclusive) || maxInclusive < 0) {
+      throw new Error(`invalid mt19937_64 range: ${maxInclusive}`);
+    }
+    const range = BigInt(maxInclusive + 1);
+    const generatorRange = uint64Mask;
+    const scaling = generatorRange / range;
+    const past = range * scaling;
+    let value = this.nextUint64();
+    while (value >= past) value = this.nextUint64();
+    return Number(value / scaling);
+  }
+
+  snapshot(): CppMt19937_64Snapshot {
+    return {
+      state: this.state.map((value) => value.toString()),
+      index: this.index,
+    };
+  }
+
+  restore(snapshot: CppMt19937_64Snapshot): void {
+    if (
+      snapshot.state.length !== this.state.length ||
+      snapshot.index < 0 ||
+      snapshot.index > this.state.length
+    ) {
+      throw new Error('invalid mt19937_64 snapshot');
+    }
+    for (let index = 0; index < this.state.length; index++) {
+      this.state[index] = BigInt(snapshot.state[index]) & uint64Mask;
+    }
+    this.index = snapshot.index;
+  }
+
+  clone(): CppMt19937_64 {
+    const copy = new CppMt19937_64(0);
+    copy.restore(this.snapshot());
+    return copy;
+  }
+
+  private seed(seed: bigint): void {
+    this.state[0] = seed & uint64Mask;
+    for (let index = 1; index < this.state.length; index++) {
+      const previous = this.state[index - 1];
+      this.state[index] =
+        (6364136223846793005n *
+          (previous ^ (previous >> 62n)) +
+          BigInt(index)) &
+        uint64Mask;
+    }
+    this.index = this.state.length;
+  }
+
+  private twist(): void {
+    const upperMask = 0xffffffff80000000n;
+    const lowerMask = 0x7fffffffn;
+    const matrix = 0xb5026f5aa96619e9n;
+    for (let index = 0; index < this.state.length; index++) {
+      const next = (index + 1) % this.state.length;
+      const value =
+        (this.state[index] & upperMask) |
+        (this.state[next] & lowerMask);
+      let twisted =
+        this.state[(index + 156) % this.state.length] ^
+        (value >> 1n);
+      if (value & 1n) twisted ^= matrix;
+      this.state[index] = twisted & uint64Mask;
     }
     this.index = 0;
   }

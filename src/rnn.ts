@@ -306,7 +306,13 @@ export function extractFeatures(state: GameState, playerId: number, selfInit: Po
       if (!rayItem && cell.item !== Item.None) rayItem = 1 / step;
       if (!rayMud && cell.block === 'mud') rayMud = 1 / step;
       if (!rayEnemy && state.players.some((p) => p.id !== playerId && p.alive && p.x === x && p.y === y)) rayEnemy = 1 / step;
-      if (info.time[x][y] > 0 && (!rayDanger || info.time[x][y] < rayDanger)) rayDanger = info.time[x][y] / 5;
+      const normalizedDanger = info.time[x][y] / 5;
+      if (
+        normalizedDanger > 0 &&
+        (!rayDanger || normalizedDanger < rayDanger)
+      ) {
+        rayDanger = normalizedDanger;
+      }
       if (cell.block != null || cell.bombId != null) break;
     }
     stats.push(clamp(rayItem, 0, 1), clamp(rayMud, 0, 1), clamp(rayEnemy, 0, 1), clamp(rayDanger, 0, 1));

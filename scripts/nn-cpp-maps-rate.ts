@@ -1,59 +1,18 @@
 import { readFileSync } from 'node:fs';
 import {
-  createGame,
-  defaultConfig,
   runRound,
   type BotController,
 } from '../src/engine';
 import { PureNnBot, RuleBot } from '../src/bots';
 import { loadPureNnPolicyFromText } from '../src/rnn';
-
-interface FullMap {
-  player_id: number;
-  round: number;
-  cells: Array<
-    Array<{
-      block_id: number;
-      bomb_id: number;
-      item: number;
-      players: number[];
-    }>
-  >;
-  players: Array<{
-    id: number;
-    x: number;
-    y: number;
-    alive: number;
-    hp: number;
-    speed: number;
-    bomb_max_num: number;
-    bomb_now_num: number;
-    bomb_range: number;
-    invincible_time: number;
-    shield_time: number;
-    has_gloves: number;
-    score: number;
-  }>;
-  bombs: Array<{
-    id: number;
-    x: number;
-    y: number;
-    range: number;
-    time_left: number;
-    owner_id: number;
-  }>;
-  blocks: Array<{
-    id: number;
-    x: number;
-    y: number;
-    removable: number;
-    hidden_item: number;
-  }>;
-}
+import {
+  fullStateFixtureToState,
+  type FullStateFixture,
+} from './fixture-state';
 
 interface MapFixture {
   seed: number;
-  maps: FullMap[];
+  maps: FullStateFixture[];
 }
 
 const fixture = JSON.parse(
@@ -65,11 +24,8 @@ let wins = 0;
 let losses = 0;
 let draws = 0;
 for (let index = 0; index < fixture.maps.length; index++) {
-  const state = createGame(fixture.seed + index, {
-    ...defaultConfig,
-    size: fixture.maps[index].cells.length,
-    maxRound: 400,
-  });
+  const seed = fixture.seed + index;
+  const state = fullStateFixtureToState(seed, fixture.maps[index]);
   const nn = new PureNnBot(loadPureNnPolicyFromText(modelText));
   const easy = new RuleBot(false, 0);
   const bots = new Map<number, BotController>([
@@ -78,6 +34,10 @@ for (let index = 0; index < fixture.maps.length; index++) {
   ]);
   for (const [playerId, bot] of bots) bot.reset?.(playerId, state);
   while (!state.over) runRound(state, bots);
+  console.log(
+    `game=${index} seed=${seed} round=${state.round} ` +
+      `winner=${state.winnerIds.length === 1 ? state.winnerIds[0] : -1}`,
+  );
   if (state.winnerIds.length !== 1) draws++;
   else if (state.winnerIds[0] === state.players[0].id) wins++;
   else losses++;
