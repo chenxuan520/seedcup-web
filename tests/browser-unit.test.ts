@@ -203,6 +203,15 @@ describe('browser application controls', () => {
       expect(dialog.open).toBe(true);
       expect(dialog.textContent).toContain(title);
       expect(dialog.textContent).toContain(detail);
+      if (seat === '2') {
+        expect(dialog.textContent).toContain('静止 + 四方向 + 放弹');
+        expect(dialog.textContent).toContain('RuleBot(true, orderMode=4)');
+        expect(dialog.textContent).toContain('ContestHardBot');
+        expect(dialog.textContent).toContain('0.05');
+        expect(dialog.textContent).toContain('0.005');
+        expect(dialog.textContent).toContain('危险区时不搜索');
+        expect(dialog.textContent).toContain('模型加载失败');
+      }
       click('#botInfoCloseBtn');
     }
 
@@ -429,6 +438,19 @@ describe('browser application controls', () => {
     const dialog = document.querySelector<HTMLDialogElement>('#helpDialog')!;
     dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(dialog.open).toBe(false);
+
+    changeSelect('.seat-select[data-seat="0"]', 'easy');
+    const easyTrigger = document.querySelector<HTMLButtonElement>(
+      '.bot-info-trigger[data-bot-info="0"]',
+    )!;
+    easyTrigger.click();
+    const botInfoDialog =
+      document.querySelector<HTMLDialogElement>('#botInfoDialog')!;
+    expect(botInfoDialog.open).toBe(true);
+    expect(document.body.classList).toContain('dialog-open');
+    botInfoDialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(botInfoDialog.open).toBe(false);
+    expect(document.body.classList).not.toContain('dialog-open');
 
     const nnTrigger = document.querySelector<HTMLButtonElement>(
       '.bot-info-trigger[data-bot-info="1"]',

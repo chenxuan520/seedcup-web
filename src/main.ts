@@ -831,25 +831,25 @@ const botInfoContent: Record<
   search: {
     kicker: 'Rule search + NN prior',
     title: '搜索增强机器人',
-    summary: '以困难 Bot 为基线，用浅层 C++ GameSim rollout 比较候选动作；NN 只提供极小先验。',
+    summary: '以训练分支的动态方向序 hard 规则为基线，用浅层 C++ GameSim rollout 比较候选动作；NN 提供极小先验。',
     body: `
       <div class="bot-info-facts">
-        <div><span>基线动作</span><strong>困难规则 Bot</strong></div>
+        <div><span>基线动作</span><strong>动态方向序 hard 规则</strong></div>
         <div><span>候选动作</span><strong>静止 + 四方向 + 放弹</strong></div>
         <div><span>搜索深度</span><strong>3 层 / 每动作 1 rollout</strong></div>
         <div><span>NN 先验权重</span><strong>0.005</strong></div>
       </div>
       <section class="bot-info-section">
         <h3>它搜索什么</h3>
-        <p>在当前完整状态上先计算 hard 的基线动作，再分别强制尝试 6 个候选动作。每个候选复制一份 C++ 对齐的 GameSim，首步执行候选动作，后续双方都继续用规则 Bot 走到深度 3，最后按存活、分数和局面结果得到 rollout 分数。</p>
+        <p>在当前完整状态上先用 <code>RuleBot(true, orderMode=4)</code> 计算训练分支 hard 基线，再分别强制尝试 6 个候选动作。每个候选复制一份 C++ 对齐的 GameSim：己方后续继续使用动态方向序 hard 规则，rollout 对手使用比赛版 <code>ContestHardBot</code>，共同走到深度 3，最后按存活、分数和局面结果得到 rollout 分数。</p>
       </section>
       <section class="bot-info-section">
         <h3>什么时候覆盖 hard</h3>
-        <p>候选动作的原始搜索分数必须比 hard 基线至少高 <code>0.05</code> 才会替换；当前玩家处于危险区时不搜索，直接保留 hard 的逃生动作。纯 NN 模型概率只以 <code>0.005</code> 的小权重参与同分附近的排序，模型未加载时仍可用纯规则搜索运行。</p>
+        <p>候选动作的原始搜索分数必须比动态方向序 hard 基线至少高 <code>0.05</code> 才会替换；当前玩家处于危险区时不搜索，直接保留该基线的逃生动作。纯 NN 模型必须先加载，它的动作概率只以 <code>0.005</code> 的小权重参与同分附近的排序；模型加载失败时当前搜索增强 Worker 会初始化失败，不会静默退成纯规则搜索。</p>
       </section>
       <section class="bot-info-section">
         <h3>能力边界</h3>
-        <p>它不是训练出的另一个模型，也不是纯 NN。浅层搜索能看到候选动作的短期后果，但深度和 rollout 数受浏览器实时性限制；当前资料不能据此宣称它稳定强于比赛版 hard。</p>
+        <p>它不是训练出的另一个模型，也不是纯 NN。它的基线合同与页面“困难”对应的比赛版 <code>ContestHardBot</code> 不同；浅层搜索能看到候选动作的短期后果，但深度和 rollout 数受浏览器实时性限制，当前资料不能据此宣称它稳定强于比赛版 hard。</p>
       </section>
     `,
   },
@@ -1504,6 +1504,10 @@ nnDialog.addEventListener('click', (event) => {
   if (event.target === nnDialog) closeDialog(nnDialog);
 });
 for (const dialog of [helpDialog, botInfoDialog, nnDialog]) {
+  dialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeDialog(dialog);
+  });
   dialog.addEventListener('close', () => {
     if (!helpDialog.open && !botInfoDialog.open && !nnDialog.open) {
       document.body.classList.remove('dialog-open');

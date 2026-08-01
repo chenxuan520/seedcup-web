@@ -189,6 +189,64 @@ async function main() {
   }
   await page.click('#botInfoCloseBtn');
 
+  const checkGenericBotInfo = async (
+    botId: 'manual' | 'hard' | 'search',
+    activation: 'Enter' | 'Space' | 'click',
+    expected: string[],
+  ) => {
+    await page.selectOption('.seat-select[data-seat="0"]', botId);
+    const trigger = '.bot-info-trigger[data-bot-info="0"]';
+    if (activation === 'click') {
+      await page.click(trigger);
+    } else {
+      await page.focus(trigger);
+      await page.keyboard.press(activation);
+    }
+    const state = await page.$eval('#botInfoDialog', (dialog) => ({
+      open: (dialog as HTMLDialogElement).open,
+      text: dialog.textContent ?? '',
+      bodyLocked: document.body.classList.contains('dialog-open'),
+    }));
+    if (
+      !state.open ||
+      !state.bodyLocked ||
+      expected.some((text) => !state.text.includes(text))
+    ) {
+      throw new Error(
+        `${botId} bot info mismatch: ${JSON.stringify(state)}`,
+      );
+    }
+    await page.keyboard.press('Escape');
+    const closed = await page.$eval('#botInfoDialog', (dialog) => ({
+      open: (dialog as HTMLDialogElement).open,
+      bodyLocked: document.body.classList.contains('dialog-open'),
+    }));
+    if (closed.open || closed.bodyLocked) {
+      throw new Error(
+        `${botId} bot info did not close cleanly: ${JSON.stringify(closed)}`,
+      );
+    }
+  };
+  await checkGenericBotInfo('manual', 'Enter', [
+    '手动玩家',
+    '键盘与屏幕方向键',
+  ]);
+  await checkGenericBotInfo('hard', 'Space', [
+    '困难机器人',
+    '最多等于当前 speed',
+  ]);
+  await checkGenericBotInfo('search', 'click', [
+    '搜索增强机器人',
+    '静止 + 四方向 + 放弹',
+    'RuleBot(true, orderMode=4)',
+    'ContestHardBot',
+    '0.05',
+    '0.005',
+    '危险区时不搜索',
+    '模型加载失败',
+  ]);
+  await page.selectOption('.seat-select[data-seat="0"]', 'easy');
+
   await page.focus('.bot-info-trigger[data-bot-info="1"]');
   await page.keyboard.press('Enter');
   const mobileNn = await page.$eval('#nnDialog', (dialog) => {
