@@ -8,6 +8,7 @@
     "url": "git+https://github.com/chenxuan520/seedcup-web.git"
   },
   "homepage": "https://chenxuan520.github.io/seedcup-web/",
+  "packageManager": "pnpm@10.17.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
