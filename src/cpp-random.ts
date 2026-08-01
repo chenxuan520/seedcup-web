@@ -8,6 +8,57 @@ export interface CppMt19937_64Snapshot {
   index: number;
 }
 
+export class GlibcRand {
+  private readonly values: number[] = [];
+  private index = 344;
+
+  constructor(seed = 1) {
+    this.seed(seed);
+  }
+
+  next(): number {
+    const value = (
+      (this.values[this.index - 31] ?? 0) +
+      (this.values[this.index - 3] ?? 0)
+    ) >>> 0;
+    this.values.push(value);
+    this.index++;
+    return value >>> 1;
+  }
+
+  randomShuffle<T>(values: T[]): void {
+    for (let index = 1; index < values.length; index++) {
+      const swapIndex = this.next() % (index + 1);
+      [values[index], values[swapIndex]] = [
+        values[swapIndex],
+        values[index],
+      ];
+    }
+  }
+
+  private seed(seed: number): void {
+    this.values.length = 0;
+    let previous = seed === 0 ? 1 : seed & 0x7fffffff;
+    this.values.push(previous);
+    for (let index = 1; index < 31; index++) {
+      previous = Number((16807n * BigInt(previous)) % 2147483647n);
+      this.values.push(previous);
+    }
+    for (let index = 31; index < 34; index++) {
+      this.values.push(this.values[index - 31]);
+    }
+    for (let index = 34; index < 344; index++) {
+      this.values.push(
+        (
+          (this.values[index - 31] ?? 0) +
+          (this.values[index - 3] ?? 0)
+        ) >>> 0,
+      );
+    }
+    this.index = 344;
+  }
+}
+
 export class CppMt19937 {
   private readonly state = new Uint32Array(624);
   private index = 624;

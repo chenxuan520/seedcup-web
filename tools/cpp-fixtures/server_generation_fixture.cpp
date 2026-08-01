@@ -14,11 +14,13 @@ constexpr int kMudRandom = 75;
 constexpr int kPotionProbability = 50;
 
 constexpr int kPotionBag[] = {
-    5, 5, 4, 3, 3,
-    1, 1, 1, 1, 1, 1,
-    2, 2, 2, 2, 2, 2,
-    6, 6, 6,
-    7, 7, 7,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    3, 3, 3, 3,
+    4,
+    5, 5, 5, 5,
+    6, 6, 6, 6, 6, 6,
+    7, 7, 7, 7, 7, 7,
 };
 
 struct Block {

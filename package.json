@@ -16,7 +16,9 @@
     "check:nn-parity": "tsx scripts/check-nn-parity.ts",
     "check:nn-sequence": "tsx scripts/check-nn-sequence.ts",
     "check:easy-parity": "tsx scripts/check-easy-parity.ts fixtures/easy_parity_seed42.json",
+    "check:easy-multiplayer": "tsx scripts/check-easy-multiplayer-parity.ts fixtures/easy_multiplayer_seed20260801.json",
     "check:easy-safety": "tsx scripts/check-easy-safety.ts",
+    "check:potion-weights": "tsx scripts/check-potion-weights.ts",
     "check:server-generation": "tsx scripts/check-server-generation.ts fixtures/server_generation_seed20260731.json",
     "check:server-scenario": "tsx scripts/check-server-scenario.ts fixtures/server_scenario_seed20260731.json 20260731",
     "check:server-multiplayer": "tsx scripts/check-server-multiplayer.ts fixtures/server_multiplayer_seed20260731.json 20260731",
@@ -27,7 +29,7 @@
     "test:settings": "tsx scripts/advanced-check.ts",
     "test:e2e": "tsx scripts/e2e.ts",
     "test:browser": "bash scripts/run-browser-tests.sh",
-    "test:all": "npm run build && npm run check:server-generation && npm run check:server-scenario && npm run check:server-multiplayer && npm run check:nn-parity && npm run check:nn-sequence && npm run check:easy-parity && npm run check:easy-safety && npm run check:search-rule && npm run check:search-hybrid && npm run test:speed && npm run test:bots",
+    "test:all": "npm run build && npm run check:potion-weights && npm run check:server-generation && npm run check:server-scenario && npm run check:server-multiplayer && npm run check:nn-parity && npm run check:nn-sequence && npm run check:easy-parity && npm run check:easy-multiplayer && npm run check:search-rule && npm run check:search-hybrid && npm run test:speed && npm run test:bots",
     "preview": "vite preview"
   },
   "devDependencies": {

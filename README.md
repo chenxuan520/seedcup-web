@@ -55,6 +55,11 @@ C++ 随机引擎。网页把用户输入的 seed 分别注入这些引擎，因�
 官方服务端生产代码中的两个洗牌引擎由 `std::random_device` 播种，本身没有固定
 seed 复现接口。
 
+默认道具权重与当前官方服务端同步为
+`火力12:炸弹12:回血4:无敌1:护盾4:加速6:手套6`。六类普通道具保持原来的
+相对比例并统一扩大两倍，无敌数量保持为 `1`，其在已生成道具中的占比由
+`1/23` 降为 `1/45`。
+
 ## 安装运行
 
 需要 Node.js 20 或更新版本。
@@ -151,7 +156,8 @@ npm run test:all
 ```
 
 该命令依次执行生产构建、官方服务端地图/RNG/规则/4 人场景对拍、搜索与混合
-搜索对拍、单帧和连续 NN 对拍、easy 安全回归、速度规则检查以及 bot 无卡死测试。
+搜索对拍、单帧和连续 NN 对拍、比赛版 easy 两人/四人动作对拍、速度规则检查
+以及 bot 无卡死测试。
 
 浏览器 E2E 会自行启动临时预览服务，验证 2 人和 4 人对局、随机地图、种子复现、爆炸效果、高级设置以及导出导入：
 
@@ -168,18 +174,17 @@ npm run test:browser
 - 特征、历史、结果特征、动作上下文和完整输入的最大误差均为 `0`
 - 40 步输出概率最大误差为 `1.734723475976807e-18`
 - 40 步 top action 不一致数为 `0`
-- C++ easy 与 TypeScript easy 连续 `1,647` 个状态动作不一致数为 `0`
+- 比赛版 C++ easy（提交 `c7cdf9e`）与 TypeScript easy：两人连续 `47` 步、四人连续 `236` 步动作不一致数均为 `0`
 - C++ RuleSearch/HybridSearch 共 `240` 个子步的 baseline、chosen、最终动作、六个候选分数和炸弹 tracker 不一致数为 `0`
-- easy 对 easy / hard 的双批次顺序安全回归中，顺序无关的主动自炸数为 `0`
-- 安全回归保留 `arrival_races` 指标：对手先到并抢占唯一出口时仍可能产生真实并发竞态
+- easy 安全脚本仅报告自炸、推弹和到达顺序竞态，不作为修改比赛版算法的依据；easy 的唯一硬门槛是 C++ 动作逐项一致
 - 同 `seed=1000..1059`、同 C++ `GameSim` 裁判下，C++/TypeScript 的 winner 和结束回合均为 `60 / 60` 一致
 
 当前留档胜率用于回归，不代表所有地图和参数下的保证值：
 
 | 评估 | 结果 |
 | --- | --- |
-| TypeScript，同 seed、C++ `GameSim`、NN 固定 P1、纯 NN 对 easy | 54 / 60，90.0% |
-| C++，同 seed、同 `GameSim`、NN 固定 P1、纯 NN 对 easy | 54 / 60，90.0% |
+| TypeScript，同 seed、C++ `GameSim`、NN 固定 P1、纯 NN 对比赛版 easy | 53 / 60，88.33% |
+| C++，同 seed、同 `GameSim`、NN 固定 P1、纯 NN 对比赛版 easy | 53 / 60，88.33% |
 | 网页随机地图 paired，纯 NN 对 easy | 97 / 120，80.83% |
 | 网页随机地图，纯 NN 对 hard | 15 / 60，25.0% |
 
@@ -211,8 +216,9 @@ fixtures/                      C++/TypeScript 对拍数据
 scripts/prepare-model.sh       本地模型准备与校验
 scripts/check-nn-parity.ts     单帧数值对拍
 scripts/check-nn-sequence.ts   连续 40 步数值对拍
-scripts/check-easy-parity.ts   C++/TypeScript easy 连续动作对拍
-scripts/check-easy-safety.ts   easy 自炸安全回归
+scripts/check-easy-parity.ts   比赛版 C++/TypeScript easy 两人动作对拍
+scripts/check-easy-multiplayer-parity.ts  比赛版 easy 四人连续动作对拍
+scripts/check-easy-safety.ts   easy 风险观测，不改变原算法
 scripts/check-server-*.ts      官方服务端生成、规则与 4 人场景对拍
 scripts/check-search-parity.ts RuleSearch/HybridSearch 子步级对拍
 tools/cpp-fixtures/            C++ fixture 生成器与复现说明

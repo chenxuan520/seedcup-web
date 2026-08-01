@@ -70,3 +70,33 @@ g++ -O3 -DNDEBUG -std=gnu++17 \
 `search_trace_export.cpp` 不执行额外诊断评分，避免调试调用推进 scorer 的炸弹跟踪
 状态。TypeScript 对拍要求 baseline、chosen、最终动作、六个候选分数和炸弹
 tracker 全部一致；混合版本的 RNN prior 允许 `1e-9` 以内的浮点舍入误差。
+
+## 比赛版 easy fixture
+
+easy 的唯一权威实现锁定为 C++ SDK 提交 `c7cdf9e`（`feat:添加手套`）中的
+`src/bot.h`。不要使用后续训练分支当前的 `src/bot.h` 重新生成 easy fixture；
+后续分支曾加入并发炸弹安全约束，会改变多人局动作并造成机器人互相避让。
+该文件的 SHA-256 为
+`ec37e5f86846108fe1028936192d0dd9773c8d7887a915792f7577cc1a7b624c`。
+
+生成时先导出历史头文件：
+
+```bash
+cd ../seedcup-cppsdk
+mkdir -p /tmp/contest-easy
+git show c7cdf9e:src/bot.h > /tmp/contest-easy/bot.h
+```
+
+`easy_trace_export.cpp` 生成两人连续 fixture，
+`easy_multiplayer_trace_export.cpp` 生成四人连续 fixture。它们直接 include 上述
+历史头文件，并按真实 SDK `ParseMap` 的逐格解析顺序重建 `GameMsg`。
+
+比赛版使用 `std::random_shuffle`，底层是 glibc `rand()`。四人生成器通过
+`initstate/setstate` 为四个 bot 保存独立随机状态，等价于四个独立 C++ 客户端
+进程。TypeScript 端使用逐值兼容的 `GlibcRand`，两人和四人 fixture 都要求动作
+分歧严格为 `0`。
+
+`contest_easy_replay.cpp` 用于复核网页实际长局。先记录每次决策前的完整状态与
+TypeScript 动作，再由该工具按 SDK `ParseMap` 的网格扫描顺序重建 `GameMsg`，
+并用四个独立比赛版 Bot 连续回放。当前额外验证的两组 15×15 四人长局分别包含
+`687` 和 `657` 个决策，动作分歧均为 `0`。

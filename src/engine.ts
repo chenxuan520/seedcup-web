@@ -285,16 +285,16 @@ export const defaultConfig: GameConfig = {
   maxRound: 1200,
 };
 
-// 对齐服务端 GenPotionList 默认表 5:5:2:1:2:3:3 展开：
-// SHIELD×2, INVINCIBLE×1, REBIRTH×2, BOMB_RANGE×6, BOMB_NUM×6, SPEED×3, GLOVES×3
-const potionBag: Item[] = [
-  Item.Shield, Item.Shield,
+// 对齐服务端 potion_probability_list = 12:12:4:1:4:6:6。
+// 六类普通道具保持原比例并统一翻倍，无敌仍为 1（占比由 1/23 降至 1/45）。
+export const potionBag: Item[] = [
+  ...Array<Item>(12).fill(Item.BombRange),
+  ...Array<Item>(12).fill(Item.BombNum),
+  ...Array<Item>(4).fill(Item.Rebirth),
   Item.Invincible,
-  Item.Rebirth, Item.Rebirth,
-  Item.BombRange, Item.BombRange, Item.BombRange, Item.BombRange, Item.BombRange, Item.BombRange,
-  Item.BombNum, Item.BombNum, Item.BombNum, Item.BombNum, Item.BombNum, Item.BombNum,
-  Item.Speed, Item.Speed, Item.Speed,
-  Item.Gloves, Item.Gloves, Item.Gloves,
+  ...Array<Item>(4).fill(Item.Shield),
+  ...Array<Item>(6).fill(Item.Speed),
+  ...Array<Item>(6).fill(Item.Gloves),
 ];
 
 export const moveDeltas: Record<Action, [number, number]> = {
@@ -596,6 +596,41 @@ export function inBounds(state: GameState, x: number, y: number): boolean {
 
 export function playerAt(state: GameState, x: number, y: number, exceptId = -1): PlayerState | undefined {
   return state.players.find((p) => p.alive && p.id !== exceptId && p.x === x && p.y === y);
+}
+
+export function cppGameMsgPlayerOrder(state: GameState): number[] {
+  const inserted: number[] = [];
+  const seen = new Set<number>();
+  for (const row of state.cells) {
+    for (const cell of row) {
+      for (const playerId of cell.players) {
+        const player = state.players.find(
+          (candidate) => candidate.id === playerId,
+        );
+        if (!player?.alive || seen.has(playerId)) continue;
+        seen.add(playerId);
+        inserted.push(playerId);
+      }
+    }
+  }
+
+  const ordered = inserted.map((id) => ({ id }));
+  let bucketCount = 1;
+  let insertedCount = 0;
+  const result: Array<{ id: number }> = [];
+  for (const value of ordered) {
+    if (bucketCount === 1 || insertedCount + 1 >= bucketCount) {
+      bucketCount = nextGcc8BucketCount(bucketCount);
+      reorderForGcc8Rehash(result, bucketCount);
+    }
+    const bucket = positiveModulo(value.id, bucketCount);
+    const sameBucketIndex = result.findIndex(
+      (existing) => positiveModulo(existing.id, bucketCount) === bucket,
+    );
+    result.splice(sameBucketIndex < 0 ? 0 : sameBucketIndex, 0, value);
+    insertedCount++;
+  }
+  return result.map((value) => value.id);
 }
 
 export function bombAt(state: GameState, id: number | null): BombState | undefined {
