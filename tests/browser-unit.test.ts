@@ -26,6 +26,12 @@ describe('browser application controls', () => {
     expect(document.querySelector('#modelStatus')?.classList).toContain(
       'ready',
     );
+    const nnTriggers = [
+      ...document.querySelectorAll<HTMLButtonElement>('.nn-info-trigger'),
+    ];
+    expect(nnTriggers).toHaveLength(2);
+    expect(nnTriggers[0].classList).toContain('is-hidden');
+    expect(nnTriggers[1].classList).not.toContain('is-hidden');
 
     click('#helpBtn');
     expect(
@@ -35,6 +41,32 @@ describe('browser application controls', () => {
     expect(
       (document.querySelector('#helpDialog') as HTMLDialogElement).open,
     ).toBe(false);
+
+    nnTriggers[1].click();
+    const nnDialog = document.querySelector<HTMLDialogElement>('#nnDialog')!;
+    expect(nnDialog.open).toBe(true);
+    expect(nnDialog.textContent).toContain('1,156,486');
+    expect(nnDialog.textContent).toContain('DLRNNH1');
+    expect(nnDialog.textContent).toContain('10,578 steps');
+    expect(nnDialog.textContent).toContain('精确反事实标注');
+    expect(nnDialog.textContent).toContain('anchor075_seed909');
+    expect(nnDialog.textContent).toContain('16 个 worker');
+    expect(nnDialog.textContent).toContain('seedcup2023');
+    expect(nnDialog.textContent).toContain('seedcup-cppsdk');
+    expect(nnDialog.textContent).toContain('deeplearning');
+    expect(nnDialog.textContent).toContain('seedcup-web');
+    expect(nnDialog.textContent).toContain('TypeScript 推理实现');
+    expect(nnDialog.textContent).toContain('1v1 训练');
+    expect(nnDialog.textContent).toContain('多人局属于弱兼容');
+    const download = document.querySelector<HTMLAnchorElement>(
+      '#nnDownloadLink',
+    )!;
+    expect(download.href).toContain('/models/pure-nn.rnn');
+    expect(download.download).toBe('pure-nn.rnn');
+    expect(document.body.classList).toContain('dialog-open');
+    click('#nnCloseBtn');
+    expect(nnDialog.open).toBe(false);
+    expect(document.body.classList).not.toContain('dialog-open');
   });
 
   test('start, pause, resume, reset, and single step work', async () => {
@@ -76,6 +108,11 @@ describe('browser application controls', () => {
         (seat) => seat.value,
       ),
     ).toEqual(['manual', 'hard', 'search', 'nn']);
+    expect(
+      [...document.querySelectorAll('.nn-info-trigger')].map((button) =>
+        button.classList.contains('is-hidden'),
+      ),
+    ).toEqual([true, true, true, false]);
 
     const seed = document.querySelector<HTMLInputElement>('#seedInput')!;
     seed.value = '12345';
@@ -257,6 +294,11 @@ describe('browser application controls', () => {
     expect(seats[0].value).toBe('search');
     expect(seats[1].value).toBe('nn');
     expect(seats[2].value).toBe('easy');
+    expect(
+      [...document.querySelectorAll('.nn-info-trigger')].map((button) =>
+        button.classList.contains('is-hidden'),
+      ),
+    ).toEqual([true, false, true]);
     expect(document.querySelector('#winnerBig')?.textContent).toBe('平局');
     expect(document.querySelector('#winnerOverlay')?.classList).toContain(
       'show',
@@ -280,6 +322,15 @@ describe('browser application controls', () => {
     const dialog = document.querySelector<HTMLDialogElement>('#helpDialog')!;
     dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(dialog.open).toBe(false);
+
+    const nnTrigger = document.querySelector<HTMLButtonElement>(
+      '.nn-info-trigger:not(.is-hidden)',
+    )!;
+    nnTrigger.click();
+    const nnDialog = document.querySelector<HTMLDialogElement>('#nnDialog')!;
+    nnDialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(nnDialog.open).toBe(false);
+    expect(document.body.classList).not.toContain('dialog-open');
 
     const speed = document.querySelector<HTMLInputElement>('#speedInput')!;
     speed.value = '1';

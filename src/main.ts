@@ -33,6 +33,10 @@ import type {
 } from './bot-protocol';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
+const modelUrl = new URL(
+  `${import.meta.env.BASE_URL}models/pure-nn.rnn`,
+  window.location.href,
+).href;
 
 app.innerHTML = `
   <header class="topbar">
@@ -328,6 +332,183 @@ app.innerHTML = `
       </div>
     </div>
   </dialog>
+
+  <dialog class="help-dialog nn-dialog" id="nnDialog" aria-labelledby="nnTitle">
+    <div class="help-shell">
+      <header class="help-head nn-head">
+        <div>
+          <span class="help-kicker">Pure neural policy</span>
+          <h2 id="nnTitle">纯神经网络 Bot 训练说明</h2>
+          <p>浏览器用 TypeScript 对齐实现直接运行 C++ 训练产出的 DLRNNH1 文本权重，不调用搜索或规则决策。</p>
+        </div>
+        <button class="help-close" id="nnCloseBtn" type="button" aria-label="关闭纯神经网络说明" title="关闭">×</button>
+      </header>
+
+      <div class="help-body nn-body">
+        <section class="help-section nn-summary-section">
+          <div class="nn-stat-grid">
+            <div><span>模型格式</span><strong>DLRNNH1</strong><small>自定义纯文本权重</small></div>
+            <div><span>参数量</span><strong>1,156,486</strong><small>约 115.6 万参数</small></div>
+            <div><span>文件大小</span><strong>6.25 MiB</strong><small>6,552,867 字节</small></div>
+            <div><span>动作空间</span><strong>6</strong><small>静止、四方向、放弹</small></div>
+          </div>
+          <div class="nn-download-row">
+            <div>
+              <strong>当前网页模型</strong>
+              <code>pure-nn.rnn</code>
+              <span>SHA-256: 33399908…17614b</span>
+            </div>
+            <a class="nn-download" id="nnDownloadLink" href="${modelUrl}" download="pure-nn.rnn">下载模型</a>
+          </div>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">01</span>
+            <div>
+              <h3>用到的仓库与分工</h3>
+              <p>训练与标注核心全部是 C++，没有 Python 训练脚本；网页端使用逐项对拍的 TypeScript 推理实现。</p>
+            </div>
+          </div>
+          <div class="nn-repo-list">
+            <a href="https://github.com/chenxuan520/seedcup2023" target="_blank" rel="noreferrer">
+              <strong>seedcup2023</strong>
+              <span>原版 C++ 服务端，是地图、炸弹、碰撞、道具、计分和胜负规则的权威来源。</span>
+            </a>
+            <a href="https://gitee.com/chenxuan520/seedcup-cppsdk" target="_blank" rel="noreferrer">
+              <strong>seedcup-cppsdk</strong>
+              <span>模型训练主仓库，包含 GameSim、规则 Bot、FeatureExtractorV2、DLBot、trainer、evaluator 和服务端客户端。</span>
+            </a>
+            <a href="https://github.com/chenxuan520/deeplearning" target="_blank" rel="noreferrer">
+              <strong>deeplearning</strong>
+              <span>纯 C++ 深度学习库，提供 SimpleRNN、前向与反向计算、优化器和 16 线程 minibatch 训练。</span>
+            </a>
+            <a href="https://github.com/chenxuan520/seedcup-web" target="_blank" rel="noreferrer">
+              <strong>seedcup-web</strong>
+              <span>当前网页仓库，使用 TypeScript 逐项移植特征提取和 DLRNNH1 前向推理，并与 C++ 概率、动作和 hidden state 对拍；浏览器不训练模型，也不是 C++/WASM 推理。</span>
+            </a>
+          </div>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">02</span>
+            <div>
+              <h3>网络结构与输入</h3>
+              <p>全图状态、历史摘要和动作上下文进入带状态的 SimpleRNN，再由非线性 head 输出 6 个动作 logits。</p>
+            </div>
+          </div>
+          <div class="nn-pipeline" aria-label="纯神经网络结构">
+            <span>1616 维输入</span><b>→</b><span>RNN 512</span><b>→</b><span>tanh head 128</span><b>→</b><span>6 动作</span>
+          </div>
+          <p class="nn-copy">基础部分是 1426 维全图特征，描述玩家、方块、道具、炸弹剩余时间、危险范围和动作合法性；再拼接 RNN 历史、动作结果、动作上下文和道具类型摘要，形成 1616 维输入。参数由 RNN 输入权重、循环权重、512 维 bias、128 维非线性 head 和 6 维输出层组成。运行时保留 hidden state，避免每一步重放最长 600 步历史。</p>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">03</span>
+            <div>
+              <h3>训练模式：在线失败修正</h3>
+              <p>不是下载一个固定数据集做普通行为克隆，而是让当前模型持续对战、暴露自己的失败状态，再用终局结果修正。</p>
+            </div>
+          </div>
+          <ol class="nn-route">
+            <li><strong>规则预训练</strong><span>早期用规则 Bot 自对弈和赢家轨迹建立基础 policy，让网络先学会移动、取道具、放弹和危险逃生的基本分布。</span></li>
+            <li><strong>on-policy 采集</strong><span>当前 NN 在 C++ GameSim 中与训练分支的 hard/easy 规则 Bot 对战，只收集模型实际会走到的状态，解决“一步走错后进入训练集外状态”的问题。</span></li>
+            <li><strong>定位失败尾段</strong><span>从输局最后 30 个 NN 决策中寻找真正可能改变终局的状态；大量早期 step 只用于推进 RNN hidden，不直接产生 loss。</span></li>
+            <li><strong>精确反事实标注</strong><span>同时复制 GameSim 和当前 RNN hidden state，对每个候选状态强制枚举静止、四方向和放弹共 6 个动作，各分支继续模拟到终局。</span></li>
+            <li><strong>生成 soft target</strong><span>只把最终能翻盘的动作写进目标；多个动作都能赢时分配为软标签，没有动作能翻盘的状态不强行标注。</span></li>
+            <li><strong>anchor 精修</strong><span>以原策略为 anchor，危险状态提高 loss 权重，主要训练 128 维 nonlinear head，控制更新幅度，减少只修一个 seed 却破坏其他能力。</span></li>
+          </ol>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">04</span>
+            <div>
+              <h3>最终一次训练的实际规模</h3>
+              <p>accepted 路线采用 exact-counterfactual head 精修；最贵的部分是 6 动作终局分支标注，RNN head 更新本身较轻。</p>
+            </div>
+          </div>
+          <div class="nn-training-grid">
+            <div><strong>采集</strong><span>64 局 on-policy 对局</span><small>8 个 worker</small></div>
+            <div><strong>标注</strong><span>434 个可修正状态</span><small>6 分支，16 个 worker</small></div>
+            <div><strong>序列</strong><span>43 条有效 trace</span><small>10,578 steps；2,715 个危险 step</small></div>
+            <div><strong>优化</strong><span>3 epochs / batch 64</span><small>anchor 0.75，危险权重 1.5，16 线程</small></div>
+          </div>
+          <p class="nn-copy">这次采集里当前模型赢 20 局、输 44 局；44 条输局中有 43 条产生有效修正，共找到 434 个可以改变终局的状态。完整探索持续数天，最耗时的是失败路线筛选、多 seed 审计和反事实终局模拟；训练日志没有统一记录单次 run 的精确 wall-clock，因此不虚构分钟级耗时。</p>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">05</span>
+            <div>
+              <h3>两个父模型从哪里来</h3>
+              <p>两个父模型结构和初始化路线一致，只改变 on-policy 数据采样 seed，让它们分别覆盖不同的失败分布。</p>
+            </div>
+          </div>
+          <div class="nn-parent-flow">
+            <div>
+              <strong>anchor075</strong>
+              <span>主采样 seed 的 exact-counterfactual head checkpoint，对 seed 123 相对更好。</span>
+            </div>
+            <b>+</b>
+            <div>
+              <strong>anchor075_seed909</strong>
+              <span>相同配置、不同采样 seed 的互补 checkpoint，对 seed 999 相对更好。</span>
+            </div>
+            <b>→</b>
+            <div class="accepted">
+              <strong>mix050</strong>
+              <span>逐参数 0.5 / 0.5 插值，选择多 seed 表现更均衡的单模型。</span>
+            </div>
+          </div>
+          <p class="nn-copy">最终网页只加载插值后的一个模型，不是运行时 ensemble，也不会同时推理两个父模型。权重插值发生在训练完成后的离线模型合成阶段。</p>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">06</span>
+            <div>
+              <h3>网页中的运行合同</h3>
+              <p>“纯神经网络”只使用 mix050 单模型前向；“搜索增强”是另一个 Bot，不属于这里。</p>
+            </div>
+          </div>
+          <div class="nn-contract">
+            <code>confidence = -1</code>
+            <code>search_depth = 0</code>
+            <code>nn_invoke_mode = always</code>
+            <code>allow_nn_in_danger = true</code>
+          </div>
+          <p class="nn-copy">网络每个动作子步都输出策略，危险状态也不切回规则逃生。动作执行前仍经过与 C++ 一致的合法性过滤，避免越界、撞墙或放置必然无法逃离的炸弹。</p>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">07</span>
+            <div>
+              <h3>能力边界</h3>
+              <p>模型对 easy 有稳定优势，但尚未稳定击败比赛版 hard；更大参数量也没有自动解决规划问题。</p>
+            </div>
+          </div>
+          <div class="nn-warning">
+            <strong>这是纯 NN 训练成果展示，不是当前最强 Bot。</strong>
+            <span>hard 的炸弹时序、连续逃生和地图控制需要前向规划；一步策略网络会损失搜索教师的大量信息。搜索增强另行加入 rollout，但真实服务端复测同样没有击败 hard。</span>
+          </div>
+          <div class="nn-warning nn-warning-secondary">
+            <strong>模型主线按 1v1 训练，多人局属于弱兼容。</strong>
+            <span>3/4 人局可以运行，但全图敌方通道会合并多个敌人，部分全局敌方标量只选择一个对手，因此多人策略没有经过与 1v1 同等强度的训练和验证。</span>
+          </div>
+          <div class="source-links nn-source-links">
+            <a href="https://github.com/chenxuan520/seedcup2023" target="_blank" rel="noreferrer">原版 C++ 服务端</a>
+            <a href="https://gitee.com/chenxuan520/seedcup-cppsdk" target="_blank" rel="noreferrer">训练与 C++ 推理代码</a>
+            <a href="https://github.com/chenxuan520/deeplearning" target="_blank" rel="noreferrer">C++ 深度学习库</a>
+            <a href="https://github.com/chenxuan520/seedcup-web" target="_blank" rel="noreferrer">浏览器推理实现</a>
+          </div>
+        </section>
+      </div>
+    </div>
+  </dialog>
 `;
 
 const canvas = document.querySelector<HTMLCanvasElement>('#board')!;
@@ -368,6 +549,8 @@ const winnerSub = document.querySelector<HTMLDivElement>('#winnerSub')!;
 const helpBtn = document.querySelector<HTMLButtonElement>('#helpBtn')!;
 const helpCloseBtn = document.querySelector<HTMLButtonElement>('#helpCloseBtn')!;
 const helpDialog = document.querySelector<HTMLDialogElement>('#helpDialog')!;
+const nnCloseBtn = document.querySelector<HTMLButtonElement>('#nnCloseBtn')!;
+const nnDialog = document.querySelector<HTMLDialogElement>('#nnDialog')!;
 
 const seatColors = ['#3b82f6', '#ef4444', '#22c55e', '#eab308'];
 const seatNames = ['蓝', '红', '绿', '黄'];
@@ -406,10 +589,6 @@ const botOptions = [
   { id: 'nn', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
 ];
 const defaultSeatBots = ['easy', 'nn', 'easy', 'easy'];
-const modelUrl = new URL(
-  `${import.meta.env.BASE_URL}models/pure-nn.rnn`,
-  window.location.href,
-).href;
 
 class BotWorkerClient {
   private readonly worker: Worker;
@@ -570,13 +749,29 @@ function renderBotSelectors(): void {
     html += `
       <div class="field">
         <label><span class="seat-chip" style="background:${seatColors[i]}"></span>${seatNames[i]}方 玩家</label>
-        <div class="select-wrap"><select class="seat-select" data-seat="${i}">${opts}</select></div>
+        <div class="seat-bot-row">
+          <div class="select-wrap"><select class="seat-select" data-seat="${i}">${opts}</select></div>
+          <button class="nn-info-trigger${cur === 'nn' ? '' : ' is-hidden'}" type="button" data-nn-info="${i}" aria-label="查看${seatNames[i]}方纯神经网络训练说明" aria-haspopup="dialog" aria-controls="nnDialog" title="查看纯神经网络训练说明">?</button>
+        </div>
       </div>`;
   }
   botSelectors.innerHTML = html;
   botSelectors.querySelectorAll<HTMLSelectElement>('.seat-select').forEach((s) => {
-    s.addEventListener('change', resetGame);
+    s.addEventListener('change', () => {
+      syncNnInfoTrigger(s);
+      resetGame();
+    });
   });
+  botSelectors.querySelectorAll<HTMLButtonElement>('.nn-info-trigger').forEach((button) => {
+    button.addEventListener('click', openNnInfo);
+  });
+}
+
+function syncNnInfoTrigger(select: HTMLSelectElement): void {
+  const trigger = select
+    .closest('.seat-bot-row')
+    ?.querySelector<HTMLButtonElement>('.nn-info-trigger');
+  trigger?.classList.toggle('is-hidden', select.value !== 'nn');
 }
 
 function seatBotIds(): string[] {
@@ -761,6 +956,7 @@ function importMatch(payload: ExportedMatch): void {
     const restoredBot =
       payload.controls.bots[index] ?? defaultSeatBots[index] ?? 'hard';
     select.value = restoredBot === 'hybrid' ? 'search' : restoredBot;
+    syncNnInfoTrigger(select);
   });
   const restored: GameState = {
     config: { ...payload.state.config },
@@ -976,21 +1172,42 @@ importFile.addEventListener('change', async () => {
   }
 });
 
-function openHelp(): void {
-  if (!helpDialog.open) helpDialog.showModal();
+function openDialog(dialog: HTMLDialogElement): void {
+  if (!dialog.open) dialog.showModal();
   document.body.classList.add('dialog-open');
 }
 
-function closeHelp(): void {
-  helpDialog.close();
+function closeDialog(dialog: HTMLDialogElement): void {
+  dialog.close();
+  if (!helpDialog.open && !nnDialog.open) {
+    document.body.classList.remove('dialog-open');
+  }
+}
+
+function openHelp(): void {
+  openDialog(helpDialog);
+}
+
+function openNnInfo(): void {
+  openDialog(nnDialog);
 }
 
 helpBtn.addEventListener('click', openHelp);
-helpCloseBtn.addEventListener('click', closeHelp);
+helpCloseBtn.addEventListener('click', () => closeDialog(helpDialog));
+nnCloseBtn.addEventListener('click', () => closeDialog(nnDialog));
 helpDialog.addEventListener('click', (event) => {
-  if (event.target === helpDialog) closeHelp();
+  if (event.target === helpDialog) closeDialog(helpDialog);
 });
-helpDialog.addEventListener('close', () => document.body.classList.remove('dialog-open'));
+nnDialog.addEventListener('click', (event) => {
+  if (event.target === nnDialog) closeDialog(nnDialog);
+});
+for (const dialog of [helpDialog, nnDialog]) {
+  dialog.addEventListener('close', () => {
+    if (!helpDialog.open && !nnDialog.open) {
+      document.body.classList.remove('dialog-open');
+    }
+  });
+}
 speedInput.addEventListener('input', loop);
 playerNumSel.addEventListener('change', () => {
   renderBotSelectors();

@@ -104,7 +104,79 @@ async function main() {
   if (await page.$eval('#helpDialog', (dialog) => (dialog as HTMLDialogElement).open)) {
     throw new Error('help dialog did not close');
   }
+  const nnInfo = await page.$$eval('.nn-info-trigger', (buttons) =>
+    buttons.map((button) => ({
+      hidden: button.classList.contains('is-hidden'),
+      label: button.getAttribute('aria-label') ?? '',
+    })),
+  );
+  if (
+    nnInfo.length !== 2 ||
+    !nnInfo[0].hidden ||
+    nnInfo[1].hidden ||
+    !nnInfo[1].label.includes('纯神经网络')
+  ) {
+    throw new Error(`nn info trigger mismatch: ${JSON.stringify(nnInfo)}`);
+  }
+  await page.click('.nn-info-trigger[data-nn-info="1"]');
+  const mobileNn = await page.$eval('#nnDialog', (dialog) => {
+    const element = dialog as HTMLDialogElement;
+    const rect = element.getBoundingClientRect();
+    const close = element.querySelector('#nnCloseBtn')?.getBoundingClientRect();
+    const download = element.querySelector<HTMLAnchorElement>('#nnDownloadLink');
+    return {
+      open: element.open,
+      text: element.textContent ?? '',
+      href: download?.href ?? '',
+      download: download?.download ?? '',
+      left: rect.left,
+      right: rect.right,
+      viewport: window.innerWidth,
+      closeVisible: Boolean(
+        close && close.top >= 0 && close.bottom <= window.innerHeight,
+      ),
+    };
+  });
+  if (
+    !mobileNn.open ||
+    !mobileNn.text.includes('1,156,486') ||
+    !mobileNn.text.includes('434 个可修正状态') ||
+    mobileNn.download !== 'pure-nn.rnn' ||
+    !mobileNn.href.includes('/models/pure-nn.rnn') ||
+    mobileNn.left < 0 ||
+    mobileNn.right > mobileNn.viewport ||
+    !mobileNn.closeVisible
+  ) {
+    throw new Error(`nn dialog mismatch: ${JSON.stringify(mobileNn)}`);
+  }
+  await page.click('#nnCloseBtn');
+  if (await page.$eval('#nnDialog', (dialog) => (dialog as HTMLDialogElement).open)) {
+    throw new Error('nn dialog did not close');
+  }
   await page.setViewportSize({ width: 1360, height: 1080 });
+
+  await page.selectOption('.seat-select[data-seat="0"]', 'nn');
+  const changedNnTriggers = await page.$$eval('.nn-info-trigger', (buttons) =>
+    buttons.map((button) => button.classList.contains('is-hidden')),
+  );
+  if (changedNnTriggers.length !== 2 || changedNnTriggers.some(Boolean)) {
+    throw new Error(
+      `nn info trigger did not follow selection: ${JSON.stringify(changedNnTriggers)}`,
+    );
+  }
+  await page.selectOption('.seat-select[data-seat="0"]', 'easy');
+  const restoredNnTriggers = await page.$$eval('.nn-info-trigger', (buttons) =>
+    buttons.map((button) => button.classList.contains('is-hidden')),
+  );
+  if (
+    restoredNnTriggers.length !== 2 ||
+    !restoredNnTriggers[0] ||
+    restoredNnTriggers[1]
+  ) {
+    throw new Error(
+      `nn info trigger did not restore: ${JSON.stringify(restoredNnTriggers)}`,
+    );
+  }
 
   const fingerprint = () =>
     page.evaluate(() => (document.querySelector('canvas') as HTMLCanvasElement).toDataURL().slice(0, 3000));
@@ -244,6 +316,8 @@ async function main() {
     desktopLayout.ordered,
     ' mobile order:',
     mobileLayout.ordered,
+    ' nn details:',
+    mobileNn.open,
   );
   console.log('worker arrivals:', arrivalOrder);
   console.log('2p moves:', moved[0].size, '/', moved[1].size, ' explosion:', shotExplosion);
