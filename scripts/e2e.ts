@@ -414,10 +414,18 @@ async function main() {
 
   const moved = [new Set<string>(), new Set<string>()];
   let shotExplosion = false;
+  let arrivalOrder = '';
   for (let i = 0; i < 100; i++) {
     await stepRound();
     const ps = await readPlayers();
     ps.forEach((p, idx) => p.x >= 0 && moved[idx].add(`${p.x},${p.y}`));
+    const roundArrivalOrder = await page.$eval(
+      '#board',
+      (board) => (board as HTMLCanvasElement).dataset.arrivalOrder ?? '',
+    );
+    if (new Set(roundArrivalOrder.split(',').filter(Boolean)).size === 2) {
+      arrivalOrder = roundArrivalOrder;
+    }
     if (!shotExplosion) {
       const boom = await page.evaluate(() =>
         Array.from(document.querySelectorAll('.log-line')).some((l) => l.textContent?.includes('爆炸')),
@@ -429,10 +437,7 @@ async function main() {
     }
     if (((await page.textContent('#roundBadge')) ?? '').includes('结束')) break;
   }
-  const arrivalOrder = await page.$eval('#board', (board) =>
-    (board as HTMLCanvasElement).dataset.arrivalOrder ?? '',
-  );
-  if (arrivalOrder.split(',').filter(Boolean).length !== 2) {
+  if (new Set(arrivalOrder.split(',').filter(Boolean)).size !== 2) {
     problems.push(`worker arrivals missing: ${arrivalOrder}`);
   }
   if (moved[0].size < 3 || moved[1].size < 3) problems.push(`2ren bot stuck: ${moved[0].size}/${moved[1].size}`);
