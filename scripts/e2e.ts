@@ -25,6 +25,22 @@ async function main() {
     throw new Error(`default bots mismatch: ${defaultBots.join('/')}`);
   }
 
+  const desktopLayout = await page.evaluate(() => {
+    const players = document.querySelector('.player-rail')?.getBoundingClientRect();
+    const arena = document.querySelector('.arena-panel')?.getBoundingClientRect();
+    const controls = document.querySelector('.control-rail')?.getBoundingClientRect();
+    if (!players || !arena || !controls) return null;
+    return {
+      ordered: players.left < arena.left && arena.left < controls.left,
+      noOverflow:
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    };
+  });
+  if (!desktopLayout?.ordered || !desktopLayout.noOverflow) {
+    throw new Error(`desktop layout mismatch: ${JSON.stringify(desktopLayout)}`);
+  }
+
   await page.click('#helpBtn');
   const helpState = await page.$eval('#helpDialog', (dialog) => {
     const text = dialog.textContent ?? '';
@@ -52,6 +68,21 @@ async function main() {
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
+  const mobileLayout = await page.evaluate(() => {
+    const players = document.querySelector('.player-rail')?.getBoundingClientRect();
+    const arena = document.querySelector('.arena-panel')?.getBoundingClientRect();
+    const controls = document.querySelector('.control-rail')?.getBoundingClientRect();
+    if (!players || !arena || !controls) return null;
+    return {
+      ordered: arena.top < players.top && players.top < controls.top,
+      noOverflow:
+        document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
+    };
+  });
+  if (!mobileLayout?.ordered || !mobileLayout.noOverflow) {
+    throw new Error(`mobile layout mismatch: ${JSON.stringify(mobileLayout)}`);
+  }
   const mobileHelp = await page.$eval('#helpDialog', (dialog) => {
     const rect = dialog.getBoundingClientRect();
     const close = dialog.querySelector('#helpCloseBtn')?.getBoundingClientRect();
@@ -206,7 +237,16 @@ async function main() {
   if (!modelText?.includes('已加载')) problems.push(`model not loaded: ${modelText}`);
 
   console.log('model:', modelText);
-  console.log('default bots:', defaultBots.join(' / '), ' help items:', helpState.itemCount);
+  console.log(
+    'default bots:',
+    defaultBots.join(' / '),
+    ' help items:',
+    helpState.itemCount,
+    ' three-column layout:',
+    desktopLayout.ordered,
+    ' mobile order:',
+    mobileLayout.ordered,
+  );
   console.log('worker arrivals:', arrivalOrder);
   console.log('2p moves:', moved[0].size, '/', moved[1].size, ' explosion:', shotExplosion);
   console.log('shuffle unique:', prints.size, '/3  seed reproducible:', fpA === fpB);

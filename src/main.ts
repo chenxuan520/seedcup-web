@@ -46,21 +46,21 @@ app.innerHTML = `
     </div>
   </header>
 
-  <section class="source-strip">
-    <div class="source-copy">
-      <span class="source-kicker">题目来源</span>
-      <strong>SeedCup 2023 炸弹人对战题</strong>
-      <span>本页是前端复刻版，规则、bot 与神经网络推理对齐本地 C++ 实现。</span>
-    </div>
-    <div class="source-links">
-      <a href="https://github.com/chenxuan520/seedcup2023" target="_blank" rel="noreferrer">官方服务端</a>
-      <a href="https://gitee.com/chenxuan520/seedcup-cppsdk" target="_blank" rel="noreferrer">C++ Bot SDK</a>
-      <a href="https://github.com/chenxuan520/deeplearning" target="_blank" rel="noreferrer">deeplearning C++</a>
-    </div>
-  </section>
-
   <div class="layout">
-    <section class="card card-pad">
+    <aside class="player-rail">
+      <section class="card card-pad player-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="panel-kicker">实时数据</span>
+            <h2>玩家状态</h2>
+          </div>
+          <span class="live-indicator"><i></i>LIVE</span>
+        </div>
+        <div id="stats"></div>
+      </section>
+    </aside>
+
+    <main class="card card-pad arena-panel">
       <div class="stage-head">
         <div class="versus" id="versus"></div>
         <div class="round-badge" id="roundBadge">回合 0</div>
@@ -95,11 +95,32 @@ app.innerHTML = `
         <span><i class="lg-danger"></i>爆炸范围</span>
         <span><i class="lg-item"></i>道具</span>
       </div>
-    </section>
 
-    <aside>
-      <div class="card card-pad">
-        <h2>对局设置</h2>
+      <section class="manual-panel">
+        <div class="manual-copy">
+          <span class="panel-kicker">手动玩家</span>
+          <h2>方向与炸弹</h2>
+          <p>键盘 WASD / 方向键移动，空格放置炸弹。</p>
+        </div>
+        <div class="dpad">
+          <button class="up" data-action="3" aria-label="向上">↑</button>
+          <button class="left" data-action="1" aria-label="向左">←</button>
+          <button class="stay" data-action="0" aria-label="原地等待">·</button>
+          <button class="right" data-action="2" aria-label="向右">→</button>
+          <button class="down" data-action="4" aria-label="向下">↓</button>
+          <button class="bomb" data-action="5">放炸弹</button>
+        </div>
+      </section>
+    </main>
+
+    <aside class="control-rail">
+      <section class="card card-pad settings-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="panel-kicker">Match setup</span>
+            <h2>对局设置</h2>
+          </div>
+        </div>
         <div class="field two-col">
           <div>
             <label>玩家数量</label>
@@ -171,30 +192,32 @@ app.innerHTML = `
           </div>
         </details>
         <div class="field-note" id="botNote"></div>
-      </div>
+      </section>
 
-      <div class="card card-pad">
-        <h2>玩家状态</h2>
-        <div id="stats"></div>
-      </div>
-
-      <div class="card card-pad">
-        <h2>手动操控</h2>
-        <div class="dpad">
-          <button class="up" data-action="3">↑</button>
-          <button class="left" data-action="1">←</button>
-          <button class="stay" data-action="0">·</button>
-          <button class="right" data-action="2">→</button>
-          <button class="down" data-action="4">↓</button>
-          <button class="bomb" data-action="5">放炸弹</button>
+      <section class="card card-pad source-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="panel-kicker">SeedCup 2023</span>
+            <h2>题目与实现</h2>
+          </div>
         </div>
-        <div class="hint">将任意一方设为「手动」后生效。<br />键盘 <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 或 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移动，<kbd>空格</kbd> 放炸弹。</div>
-      </div>
+        <p>2023 年种子杯炸弹人对战题。网页规则、机器人和神经网络推理均与 C++ 实现对拍。</p>
+        <div class="source-links">
+          <a href="https://github.com/chenxuan520/seedcup2023" target="_blank" rel="noreferrer">官方服务端</a>
+          <a href="https://gitee.com/chenxuan520/seedcup-cppsdk" target="_blank" rel="noreferrer">C++ Bot SDK</a>
+          <a href="https://github.com/chenxuan520/deeplearning" target="_blank" rel="noreferrer">深度学习库</a>
+        </div>
+      </section>
 
-      <div class="card card-pad">
-        <h2>事件日志</h2>
+      <section class="card card-pad log-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="panel-kicker">Round events</span>
+            <h2>对局日志</h2>
+          </div>
+        </div>
         <div class="log" id="log"></div>
-      </div>
+      </section>
     </aside>
   </div>
 
