@@ -27,10 +27,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
+
+      - name: 固定 npm 版本
+        run: npm install --global npm@10.9.2
 
       - name: 安装依赖
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: 安装 Chromium
         run: npx playwright install --with-deps chromium
@@ -53,10 +55,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
+
+      - name: 固定 npm 版本
+        run: npm install --global npm@10.9.2
 
       - name: 安装依赖
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: 构建网页
         run: npm run build
