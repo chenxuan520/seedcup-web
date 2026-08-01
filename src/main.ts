@@ -400,7 +400,7 @@ const botOptions = [
   { id: 'nn', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
   { id: 'hybrid', label: '神经网络+搜索', note: '搜索为主，叠加一个小权重的 NN 策略先验。' },
 ];
-const defaultSeatBots = ['manual', 'nn', 'easy', 'easy'];
+const defaultSeatBots = ['easy', 'nn', 'easy', 'easy'];
 const modelUrl = new URL(
   `${import.meta.env.BASE_URL}models/pure-nn.rnn`,
   window.location.href,

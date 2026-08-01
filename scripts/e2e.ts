@@ -21,7 +21,7 @@ async function main() {
   const defaultBots = await page.$$eval('.seat-select', (selects) =>
     selects.map((select) => (select as HTMLSelectElement).value),
   );
-  if (defaultBots[0] !== 'manual' || defaultBots[1] !== 'nn') {
+  if (defaultBots[0] !== 'easy' || defaultBots[1] !== 'nn') {
     throw new Error(`default bots mismatch: ${defaultBots.join('/')}`);
   }
 
