@@ -401,33 +401,134 @@ app.innerHTML = `
           <div class="nn-pipeline" aria-label="纯神经网络结构">
             <span>1616 维输入</span><b>→</b><span>RNN 512</span><b>→</b><span>tanh head 128</span><b>→</b><span>6 动作</span>
           </div>
-          <p class="nn-copy">基础部分是 1426 维全图特征，描述玩家、方块、道具、炸弹剩余时间、危险范围和动作合法性；再拼接 RNN 历史、动作结果、动作上下文和道具类型摘要，形成 1616 维输入。参数由 RNN 输入权重、循环权重、512 维 bias、128 维非线性 head 和 6 维输出层组成。运行时保留 hidden state，避免每一步重放最长 600 步历史。</p>
+          <p class="nn-copy">参数由 RNN 输入权重、循环权重、512 维 bias、128 维非线性 head 和 6 维输出层组成。运行时保留 hidden state，避免每一步重放最长 600 步历史。</p>
+          <div class="nn-layer-table" role="table" aria-label="神经网络逐层参数量">
+            <div class="nn-layer-head" role="row"><b role="columnheader">层 / 张量</b><b role="columnheader">形状</b><b role="columnheader">参数量</b><b role="columnheader">占比</b></div>
+            <div role="row"><span role="cell">RNN 输入权重</span><code role="cell">512 × 1616</code><strong role="cell">827,392</strong><small role="cell">71.54%</small></div>
+            <div role="row"><span role="cell">RNN 循环权重</span><code role="cell">512 × 512</code><strong role="cell">262,144</strong><small role="cell">22.67%</small></div>
+            <div role="row"><span role="cell">RNN bias</span><code role="cell">512</code><strong role="cell">512</strong><small role="cell">0.04%</small></div>
+            <div role="row"><span role="cell">tanh head 权重</span><code role="cell">128 × 512</code><strong role="cell">65,536</strong><small role="cell">5.67%</small></div>
+            <div role="row"><span role="cell">head bias</span><code role="cell">128</code><strong role="cell">128</strong><small role="cell">0.01%</small></div>
+            <div role="row"><span role="cell">动作输出权重</span><code role="cell">6 × 128</code><strong role="cell">768</strong><small role="cell">0.07%</small></div>
+            <div role="row"><span role="cell">动作输出 bias</span><code role="cell">6</code><strong role="cell">6</strong><small role="cell">&lt;0.01%</small></div>
+            <div class="nn-layer-total" role="row"><span role="cell">合计</span><code role="cell">—</code><strong role="cell">1,156,486</strong><small role="cell">100%</small></div>
+          </div>
+          <p class="nn-copy">参数主体在输入矩阵（约 82.7 万）和循环矩阵（约 26.2 万）；128 维 head 约 6.6 万。模型文件比“参数量 × 4/8 字节”更大，是因为当前 <code>.rnn</code> 使用十进制纯文本保存浮点权重，便于 C++ 与浏览器直接解析和对拍。</p>
         </section>
 
         <section class="help-section">
           <div class="help-section-title">
             <span class="help-step">03</span>
             <div>
-              <h3>训练模式：在线失败修正</h3>
-              <p>不是下载一个固定数据集做普通行为克隆，而是让当前模型持续对战、暴露自己的失败状态，再用终局结果修正。</p>
+              <h3>1616 维输入分别是什么</h3>
+              <p>最终 mix050 模型使用四组输入，维度严格为 1426 + 16 + 30 + 144 = 1616。</p>
             </div>
           </div>
-          <ol class="nn-route">
-            <li><strong>规则预训练</strong><span>早期用规则 Bot 自对弈和赢家轨迹建立基础 policy，让网络先学会移动、取道具、放弹和危险逃生的基本分布。</span></li>
-            <li><strong>on-policy 采集</strong><span>当前 NN 在 C++ GameSim 中与训练分支的 hard/easy 规则 Bot 对战，只收集模型实际会走到的状态，解决“一步走错后进入训练集外状态”的问题。</span></li>
-            <li><strong>定位失败尾段</strong><span>从输局最后 30 个 NN 决策中寻找真正可能改变终局的状态；大量早期 step 只用于推进 RNN hidden，不直接产生 loss。</span></li>
-            <li><strong>精确反事实标注</strong><span>同时复制 GameSim 和当前 RNN hidden state，对每个候选状态强制枚举静止、四方向和放弹共 6 个动作，各分支继续模拟到终局。</span></li>
-            <li><strong>生成 soft target</strong><span>只把最终能翻盘的动作写进目标；多个动作都能赢时分配为软标签，没有动作能翻盘的状态不强行标注。</span></li>
-            <li><strong>anchor 精修</strong><span>以原策略为 anchor，危险状态提高 loss 权重，主要训练 128 维 nonlinear head，控制更新幅度，减少只修一个 seed 却破坏其他能力。</span></li>
-          </ol>
+          <div class="nn-feature-groups">
+            <div>
+              <strong>1426 维状态</strong>
+              <span>13 × 13 地图的 8 个通道共 1352 维，再加 74 个全局与方向摘要。</span>
+            </div>
+            <div>
+              <strong>16 维历史</strong>
+              <span>最近两个动作 one-hot、最近两步是否危险、当前 speed 子步和距离上次放弹的步数。</span>
+            </div>
+            <div>
+              <strong>30 维动作结果</strong>
+              <span>6 个动作各 5 维：合法、落点危险、最近安全区、敌人距离变化、是否能放弹。</span>
+            </div>
+            <div>
+              <strong>144 维动作上下文</strong>
+              <span>6 个动作各 24 维，描述落点、炸弹、敌人、危险时间和逃生路径。</span>
+            </div>
+          </div>
+
+          <h4 class="nn-subtitle">地图 8 通道：每个格子各 1 个值</h4>
+          <div class="nn-feature-table" role="table" aria-label="地图输入通道">
+            <div role="row"><b role="cell">可行走</b><span role="cell">无方块且无炸弹记 1，否则 0。</span></div>
+            <div role="row"><b role="cell">可破坏泥墙</b><span role="cell">泥墙记 1；固定墙和空地记 0。墙没有逐点血量。</span></div>
+            <div role="row"><b role="cell">炸弹</b><span role="cell">该格有炸弹记 1；炸弹没有血量，只记录位置、范围、所有者和倒计时。</span></div>
+            <div role="row"><b role="cell">爆炸危险</b><span role="cell">位于任意炸弹十字爆炸范围内记 1，方块会阻断传播。</span></div>
+            <div role="row"><b role="cell">任意道具</b><span role="cell">只区分“有/无道具”，拾取前不把火力、回血等类型单独编码。</span></div>
+            <div role="row"><b role="cell">任意敌人</b><span role="cell">该格存在其他存活玩家记 1；多人局会合并到同一个敌方通道。</span></div>
+            <div role="row"><b role="cell">炸弹时间</b><span role="cell">炸弹格的剩余时间除以 5，并截断到 0–1；新出现或未知炸弹按 1 处理。</span></div>
+            <div role="row"><b role="cell">最早危险时间</b><span role="cell">危险格最早会被哪颗炸弹覆盖，同样按倒计时 / 5 归一化。</span></div>
+          </div>
+
+          <h4 class="nn-subtitle">74 维全局与空间摘要</h4>
+          <div class="nn-param-list">
+            <div><strong>自身 10 维</strong><span>x/12、y/12、HP/3、炸弹上限/5、当前炸弹数/5、火力/5、速度/3、手套、无敌、护盾。</span></div>
+            <div><strong>敌方 13 维</strong><span>同类位置和属性、是否存活、双方分差/25000、曼哈顿距离/24；3/4 人局的这组标量只取一个敌人。</span></div>
+            <div><strong>回合与出生点 13 维</strong><span>回合/300；双方出生坐标/12，以及出生在上、下、左、右半区的标志。</span></div>
+            <div><strong>动作合法性 6 维</strong><span>静止、左、右、上、下、放弹分别为 0/1；越界、墙、炸弹和从安全区走入危险区会被判非法。</span></div>
+            <div><strong>四方向摘要 32 维</strong><span>每个方向 8 维：相邻格可走/道具/泥墙/危险时间，以及射线上最近道具、泥墙、敌人和最早危险时间。</span></div>
+          </div>
+
+          <h4 class="nn-subtitle">每个候选动作的 24 维上下文</h4>
+          <p class="nn-copy nn-copy-tight">包括是否越界、是否阻塞、静止/放弹标志、目标坐标、目标是否有道具、到敌人的距离、是否有炸弹额度、爆炸是否覆盖敌人、自身无敌/护盾、当前和落点危险时间、最近安全区距离、放弹后能否逃生、逃生距离，以及“能炸到敌人且自己能逃”的组合标志。</p>
         </section>
 
         <section class="help-section">
           <div class="help-section-title">
             <span class="help-step">04</span>
             <div>
+              <h3>道具和玩家属性怎么进入模型</h3>
+              <p>道具不是可攻击单位，没有独立血量、护甲或耐久；它只是地图格上的离散类型，玩家走到格子后立即生效并消失。</p>
+            </div>
+          </div>
+          <div class="nn-item-effects">
+            <div><span class="help-item-icon fire">✣</span><strong>火力</strong><span>玩家 bombRange +1；下一步通过“火力/5”进入自身全局属性。</span></div>
+            <div><span class="help-item-icon capacity">●<b>+</b></span><strong>炸弹</strong><span>玩家 bombMax +1；当前已放数量另用 bombNow/5 表示。</span></div>
+            <div><span class="help-item-icon heal">♥</span><strong>回血</strong><span>HP 未达到配置的 playerMaxHp 时 +1；模型的基础特征固定按 HP/3 归一化并截断到 0–1。</span></div>
+            <div><span class="help-item-icon invincible">★</span><strong>无敌</strong><span>输入只记录“当前剩余时间是否大于 0”，不直接输入完整剩余秒数。</span></div>
+            <div><span class="help-item-icon shield">⬟</span><strong>护盾</strong><span>同样以 0/1 表示是否存在；受伤时会消耗护盾。</span></div>
+            <div><span class="help-item-icon speed">ϟ</span><strong>加速</strong><span>玩家 speed +1；通过“速度/3”进入输入，在 C++ GameSim rollout 中上限为 4。</span></div>
+            <div><span class="help-item-icon gloves">✊</span><strong>手套</strong><span>以 0/1 属性输入，决定玩家能否推动静止炸弹。</span></div>
+          </div>
+          <div class="nn-warning nn-warning-secondary">
+            <strong>一个重要取舍：拾取前不区分道具类型。</strong>
+            <span>基础地图只告诉网络“这里有一个道具”；走上去以后，道具造成的 HP、火力、速度、炸弹上限、无敌、护盾或手套变化才通过玩家属性进入下一步。这样减少输入维度，但网络无法在拾取前直接知道道具具体种类。</span>
+          </div>
+          <p class="nn-copy">当前训练合同以 13 × 13、默认血量上限 3 为主。网页虽然允许调整血量上限，但特征公式仍固定使用 HP/3；HP 超过 3 时会截断为 1。因此改动高级设置后模型可以继续运行，但不代表它在该参数分布上训练过。</p>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">05</span>
+            <div>
+              <h3>训练模式：在线失败修正</h3>
+              <p>这里的“在线”指训练时用当前版本模型现场生成新对局数据，不是网页运行时继续学习，也不是连接线上服务器更新权重。</p>
+            </div>
+          </div>
+          <div class="nn-training-explain">
+            <strong>为什么不只模仿 hard 的动作？</strong>
+            <p>如果只保存“这个状态下 hard 走了什么”，网络一旦自己走错一步，就会进入老师轨迹没有覆盖的新状态；而且 hard 的强度有一部分来自连续逃生与未来炸弹时序，压成单步动作标签会丢失信息。最终路线因此改为：让当前 NN 自己打，专门寻找它实际输掉的原因。</p>
+          </div>
+          <ol class="nn-route">
+            <li><strong>规则预训练</strong><span>早期用规则 Bot 自对弈和赢家轨迹建立基础 policy，让网络先学会移动、取道具、放弹和危险逃生的基本分布。</span></li>
+            <li><strong>当前模型自己对战</strong><span>冻结一个候选模型，让它在 C++ GameSim 中与训练分支的 hard/easy 规则 Bot 完整打完 64 局。保存每一步 GameMsg、1426 维特征、历史摘要、当时 hidden 所需上下文、实际动作、是否危险，以及最终胜负和分数。</span></li>
+            <li><strong>筛出真正的失败局</strong><span>本次代表性 run 中模型赢 20 局、输 44 局。赢局说明当前策略至少能完成目标，不用于尾部纠错；主要处理 44 条输局，避免把已经成功的动作序列改坏。</span></li>
+            <li><strong>只查看最后 30 个决策</strong><span>越靠近终局，某一步是否导致死亡或翻盘越容易判断；太早的动作要经过很长未来，因果噪声更大且计算昂贵。前面的 step 仍按原动作顺序重放，用来恢复该时刻真实的 RNN hidden state。</span></li>
+            <li><strong>复制完整分支点</strong><span>到达一个候选 step 时，同时复制地图、玩家、炸弹、随机状态、当前 DLBot 和 RNN hidden。这样 6 个候选动作从完全相同的历史出发，不会把不同 hidden 混成标签。</span></li>
+            <li><strong>强制尝试 6 个动作</strong><span>分别执行静止、左、右、上、下、放弹；非法动作不会得到正标签。执行第一步后，各分支继续让当前 NN policy 对战 hard 规则对手，一直模拟到胜负确定，而不是只看一两步启发式分数。</span></li>
+            <li><strong>用终局生成 soft target</strong><span>原轨迹会输、某个替代动作分支最终会赢，才说明该动作有翻盘证据。一个动作能赢时目标集中给它；多个动作都能赢时在这些动作之间分配概率；六个动作都不能赢时，该状态不做强监督。</span></li>
+            <li><strong>重放 context，监督关键 step</strong><span>一条 trace 中早期和中段多数 step 的 loss_weight 为 0，只负责按真实顺序把 hidden 推到分支点；真正产生交叉熵 loss 的，是得到反事实目标的尾部 supervised step。</span></li>
+            <li><strong>anchor 保守更新</strong><span>最终 target = 0.75 × 原模型概率 + 0.25 × 反事实目标。它不是强迫网络完全改成某个动作，而是在保留 75% 原策略的同时注入翻盘证据，防止稀疏标签导致灾难性遗忘。</span></li>
+            <li><strong>危险状态加权</strong><span>危险 step 的 loss 乘 1.5，因为逃生与炸弹时序错误通常直接决定死亡；普通状态保持基础权重。学习率使用 0.00005，主要精修 128 维 nonlinear head/readout，而不是大幅重写整个 RNN body。</span></li>
+            <li><strong>多 seed 审计后才晋级</strong><span>每个短 run 训练完先打 seed 42、123、999 等多组对局。只在单个 seed 变好、其他 seed 明显退化的模型直接淘汰；最终保留互补 checkpoint，再做离线权重插值。</span></li>
+          </ol>
+          <div class="nn-target-formula" aria-label="anchor soft target 公式">
+            <span>最终训练目标</span>
+            <code>target = 0.75 × base_policy + 0.25 × counterfactual_target</code>
+          </div>
+        </section>
+
+        <section class="help-section">
+          <div class="help-section-title">
+            <span class="help-step">06</span>
+            <div>
               <h3>最终一次训练的实际规模</h3>
-              <p>accepted 路线采用 exact-counterfactual head 精修；最贵的部分是 6 动作终局分支标注，RNN head 更新本身较轻。</p>
+              <p>最终采用精确反事实标注（exact-counterfactual）做 head 精修；最贵的部分是 6 动作终局分支标注，RNN head 更新本身较轻。</p>
             </div>
           </div>
           <div class="nn-training-grid">
@@ -441,7 +542,7 @@ app.innerHTML = `
 
         <section class="help-section">
           <div class="help-section-title">
-            <span class="help-step">05</span>
+            <span class="help-step">07</span>
             <div>
               <h3>两个父模型从哪里来</h3>
               <p>两个父模型结构和初始化路线一致，只改变 on-policy 数据采样 seed，让它们分别覆盖不同的失败分布。</p>
@@ -468,7 +569,7 @@ app.innerHTML = `
 
         <section class="help-section">
           <div class="help-section-title">
-            <span class="help-step">06</span>
+            <span class="help-step">08</span>
             <div>
               <h3>网页中的运行合同</h3>
               <p>“纯神经网络”只使用 mix050 单模型前向；“搜索增强”是另一个 Bot，不属于这里。</p>
@@ -485,7 +586,7 @@ app.innerHTML = `
 
         <section class="help-section">
           <div class="help-section-title">
-            <span class="help-step">07</span>
+            <span class="help-step">09</span>
             <div>
               <h3>能力边界</h3>
               <p>模型对 easy 有稳定优势，但尚未稳定击败比赛版 hard；更大参数量也没有自动解决规划问题。</p>
@@ -745,13 +846,18 @@ function renderBotSelectors(): void {
   let html = '';
   for (let i = 0; i < num; i++) {
     const cur = prev[i] ?? defaultSeatBots[i] ?? 'hard';
+    const currentLabel =
+      botOptions.find((bot) => bot.id === cur)?.label ?? '困难';
     const opts = botOptions.map((b) => `<option value="${b.id}"${b.id === cur ? ' selected' : ''}>${b.label}</option>`).join('');
     html += `
       <div class="field">
         <label><span class="seat-chip" style="background:${seatColors[i]}"></span>${seatNames[i]}方 玩家</label>
-        <div class="seat-bot-row">
-          <div class="select-wrap"><select class="seat-select" data-seat="${i}">${opts}</select></div>
-          <button class="nn-info-trigger${cur === 'nn' ? '' : ' is-hidden'}" type="button" data-nn-info="${i}" aria-label="查看${seatNames[i]}方纯神经网络训练说明" aria-haspopup="dialog" aria-controls="nnDialog" title="查看纯神经网络训练说明">?</button>
+        <div class="select-wrap seat-select-wrap">
+          <select class="seat-select" data-seat="${i}" aria-label="${seatNames[i]}方玩家机器人">${opts}</select>
+          <div class="seat-selection-overlay">
+            <span class="seat-selection-label" aria-hidden="true">${currentLabel}</span>
+            <button class="nn-info-trigger${cur === 'nn' ? '' : ' is-hidden'}" type="button" data-nn-info="${i}" aria-label="查看${seatNames[i]}方纯神经网络训练说明" aria-haspopup="dialog" aria-controls="nnDialog" title="查看纯神经网络训练说明">?</button>
+          </div>
         </div>
       </div>`;
   }
@@ -768,9 +874,12 @@ function renderBotSelectors(): void {
 }
 
 function syncNnInfoTrigger(select: HTMLSelectElement): void {
-  const trigger = select
-    .closest('.seat-bot-row')
-    ?.querySelector<HTMLButtonElement>('.nn-info-trigger');
+  const wrap = select.closest('.seat-select-wrap');
+  const trigger = wrap?.querySelector<HTMLButtonElement>('.nn-info-trigger');
+  const label = wrap?.querySelector<HTMLSpanElement>('.seat-selection-label');
+  if (label) {
+    label.textContent = select.selectedOptions[0]?.textContent ?? select.value;
+  }
   trigger?.classList.toggle('is-hidden', select.value !== 'nn');
 }
 

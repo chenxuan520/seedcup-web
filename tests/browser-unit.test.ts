@@ -32,6 +32,14 @@ describe('browser application controls', () => {
     expect(nnTriggers).toHaveLength(2);
     expect(nnTriggers[0].classList).toContain('is-hidden');
     expect(nnTriggers[1].classList).not.toContain('is-hidden');
+    const nnWrap = nnTriggers[1].closest('.seat-select-wrap')!;
+    const nnLabel = nnWrap.querySelector<HTMLElement>('.seat-selection-label')!;
+    const wrapRect = nnWrap.getBoundingClientRect();
+    const labelRect = nnLabel.getBoundingClientRect();
+    const triggerRect = nnTriggers[1].getBoundingClientRect();
+    expect(triggerRect.left - labelRect.right).toBeGreaterThanOrEqual(3);
+    expect(triggerRect.left - labelRect.right).toBeLessThanOrEqual(7);
+    expect(wrapRect.right - triggerRect.right).toBeGreaterThan(30);
 
     click('#helpBtn');
     expect(
@@ -58,6 +66,21 @@ describe('browser application controls', () => {
     expect(nnDialog.textContent).toContain('TypeScript 推理实现');
     expect(nnDialog.textContent).toContain('1v1 训练');
     expect(nnDialog.textContent).toContain('多人局属于弱兼容');
+    expect(nnDialog.textContent).toContain('1426 + 16 + 30 + 144 = 1616');
+    expect(nnDialog.textContent).toContain('827,392');
+    expect(nnDialog.textContent).toContain('262,144');
+    expect(nnDialog.textContent).toContain('65,536');
+    expect(nnDialog.textContent).toContain('71.54%');
+    expect(nnDialog.textContent).toContain('HP/3');
+    expect(nnDialog.textContent).toContain('炸弹上限/5');
+    expect(nnDialog.textContent).toContain('道具不是可攻击单位');
+    expect(nnDialog.textContent).toContain('拾取前不区分道具类型');
+    expect(nnDialog.textContent).toContain('loss_weight 为 0');
+    expect(nnDialog.textContent).toContain(
+      'target = 0.75 × base_policy + 0.25 × counterfactual_target',
+    );
+    expect(nnDialog.textContent).toContain('学习率使用 0.00005');
+    expect(nnDialog.textContent).toContain('多 seed 审计后才晋级');
     const download = document.querySelector<HTMLAnchorElement>(
       '#nnDownloadLink',
     )!;

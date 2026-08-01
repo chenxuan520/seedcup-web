@@ -105,16 +105,29 @@ async function main() {
     throw new Error('help dialog did not close');
   }
   const nnInfo = await page.$$eval('.nn-info-trigger', (buttons) =>
-    buttons.map((button) => ({
-      hidden: button.classList.contains('is-hidden'),
-      label: button.getAttribute('aria-label') ?? '',
-    })),
+    buttons.map((button) => {
+      const trigger = button.getBoundingClientRect();
+      const wrap = button.closest('.seat-select-wrap')?.getBoundingClientRect();
+      const label = button
+        .closest('.seat-select-wrap')
+        ?.querySelector('.seat-selection-label')
+        ?.getBoundingClientRect();
+      return {
+        hidden: button.classList.contains('is-hidden'),
+        label: button.getAttribute('aria-label') ?? '',
+        textGap: label ? trigger.left - label.right : -1,
+        trailingSpace: wrap ? wrap.right - trigger.right : -1,
+      };
+    }),
   );
   if (
     nnInfo.length !== 2 ||
     !nnInfo[0].hidden ||
     nnInfo[1].hidden ||
-    !nnInfo[1].label.includes('纯神经网络')
+    !nnInfo[1].label.includes('纯神经网络') ||
+    nnInfo[1].textGap < 3 ||
+    nnInfo[1].textGap > 7 ||
+    nnInfo[1].trailingSpace <= 30
   ) {
     throw new Error(`nn info trigger mismatch: ${JSON.stringify(nnInfo)}`);
   }
@@ -141,6 +154,11 @@ async function main() {
     !mobileNn.open ||
     !mobileNn.text.includes('1,156,486') ||
     !mobileNn.text.includes('434 个可修正状态') ||
+    !mobileNn.text.includes('1426 + 16 + 30 + 144 = 1616') ||
+    !mobileNn.text.includes('827,392') ||
+    !mobileNn.text.includes('262,144') ||
+    !mobileNn.text.includes('拾取前不区分道具类型') ||
+    !mobileNn.text.includes('0.75 × base_policy') ||
     mobileNn.download !== 'pure-nn.rnn' ||
     !mobileNn.href.includes('/models/pure-nn.rnn') ||
     mobileNn.left < 0 ||
