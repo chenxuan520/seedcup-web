@@ -416,9 +416,20 @@ async function main() {
         };
       }),
     );
+    const labelsMatchBot = (selected: string, visible: string) => {
+      if (selected === '简单') {
+        return visible === '简单（easy，纯逻辑判断）';
+      }
+      if (selected === '困难') {
+        return visible === '困难（hard，纯逻辑判断）';
+      }
+      return selected === visible;
+    };
     if (
       afterImportSelections.length !== 4 ||
-      afterImportSelections.some((seat) => seat.selected !== seat.visible)
+      afterImportSelections.some(
+        (seat) => !labelsMatchBot(seat.selected, seat.visible),
+      )
     ) {
       problems.push(
         `import bot labels out of sync: ${JSON.stringify(afterImportSelections)}`,

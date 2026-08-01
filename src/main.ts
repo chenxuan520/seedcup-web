@@ -723,16 +723,9 @@ const botOptions = [
   { id: 'nn', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
 ];
 const defaultSeatBots = ['easy', 'nn', 'easy', 'easy'];
-const mobileBotLabelQuery = window.matchMedia('(max-width: 640px)');
 
 function botOption(id: string) {
   return botOptions.find((bot) => bot.id === id);
-}
-
-function botLabelText(id: string, compact = mobileBotLabelQuery.matches): string {
-  const option = botOption(id);
-  if (!option) return '困难';
-  return option.label + (compact ? '' : (option.qualifier ?? ''));
 }
 
 function botLabelHtml(id: string): string {
@@ -900,7 +893,7 @@ function renderBotSelectors(): void {
   for (let i = 0; i < num; i++) {
     const cur = prev[i] ?? defaultSeatBots[i] ?? 'hard';
     const currentLabel = botLabelHtml(cur);
-    const opts = botOptions.map((b) => `<option value="${b.id}"${b.id === cur ? ' selected' : ''}>${botLabelText(b.id)}</option>`).join('');
+    const opts = botOptions.map((b) => `<option value="${b.id}"${b.id === cur ? ' selected' : ''}>${b.label}</option>`).join('');
     html += `
       <div class="field">
         <label><span class="seat-chip" style="background:${seatColors[i]}"></span>${seatNames[i]}方 玩家</label>
@@ -935,23 +928,11 @@ function syncNnInfoTrigger(select: HTMLSelectElement): void {
   trigger?.classList.toggle('is-hidden', select.value !== 'nn');
 }
 
-function refreshResponsiveBotLabels(): void {
-  botSelectors.querySelectorAll<HTMLSelectElement>('.seat-select').forEach((select) => {
-    for (const option of select.options) {
-      option.textContent = botLabelText(option.value);
-    }
-    syncNnInfoTrigger(select);
-  });
-  updateNames();
-  renderStats();
-}
-
 function seatBotIds(): string[] {
   return [...botSelectors.querySelectorAll<HTMLSelectElement>('.seat-select')].map((s) => s.value);
 }
 
 renderBotSelectors();
-mobileBotLabelQuery.addEventListener('change', refreshResponsiveBotLabels);
 
 window.addEventListener('error', (e) => setError(`运行错误：${e.message}`));
 window.addEventListener('unhandledrejection', (e) => setError(`运行错误：${String(e.reason).slice(0, 90)}`));
