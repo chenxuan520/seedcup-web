@@ -137,6 +137,10 @@ export class CppMt19937 {
     return copy;
   }
 
+  reseed(seed: number): void {
+    this.seed(seed);
+  }
+
   private seed(seed: number): void {
     this.state[0] = seed >>> 0;
     for (let index = 1; index < this.state.length; index++) {

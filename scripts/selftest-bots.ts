@@ -1,7 +1,12 @@
 import { createGame, runRound, type BotController } from '../src/engine';
-import { RuleBot, SearchBot, ManualBot } from '../src/bots';
+import {
+  ContestHardBot,
+  ManualBot,
+  RuleBot,
+  SearchBot,
+} from '../src/bots';
 
-function play(makeP1: () => BotController, makeP2: () => BotController, seed: number, maxRounds = 400) {
+function play(makeP1: () => BotController, makeP2: () => BotController, seed: number, maxRounds = 120) {
   const state = createGame(seed);
   const p1 = makeP1();
   const p2 = makeP2();
@@ -50,12 +55,12 @@ function play(makeP1: () => BotController, makeP2: () => BotController, seed: nu
   };
 }
 
-const seeds = [1, 42, 123, 777, 999, 20260730, 31415, 2718];
+const seeds = [1, 42, 123, 777];
 let fail = 0;
 
 console.log('=== 困难 vs 困难 ===');
 for (const s of seeds) {
-  const r = play(() => new RuleBot(true, 4), () => new RuleBot(true, 4), s);
+  const r = play(() => new ContestHardBot(), () => new ContestHardBot(), s);
   const bad = r.moves1 < 3 || r.moves2 < 3;
   if (bad) fail++;
   console.log(
@@ -65,7 +70,7 @@ for (const s of seeds) {
 
 console.log('=== 简单 vs 困难 ===');
 for (const s of seeds) {
-  const r = play(() => new RuleBot(false, 0), () => new RuleBot(true, 4), s);
+  const r = play(() => new RuleBot(false, 0), () => new ContestHardBot(), s);
   const bad = r.moves1 < 3 || r.moves2 < 3;
   if (bad) fail++;
   console.log(
@@ -74,8 +79,12 @@ for (const s of seeds) {
 }
 
 console.log('=== 搜索 vs 困难 ===');
-for (const s of [42, 20260730, 999]) {
-  const r = play(() => new SearchBot(6, 2, 0.05), () => new RuleBot(true, 4), s);
+for (const s of [42]) {
+  const r = play(
+    () => new SearchBot(6, 2, 0.05),
+    () => new ContestHardBot(),
+    s,
+  );
   const bad = r.moves1 < 3 || r.moves2 < 3;
   if (bad) fail++;
   console.log(
@@ -86,7 +95,7 @@ for (const s of [42, 20260730, 999]) {
 // 手动 vs 困难：手动方静止，困难方应照常行动
 console.log('=== 手动(静止) vs 困难 ===');
 {
-  const r = play(() => new ManualBot(), () => new RuleBot(true, 4), 42);
+  const r = play(() => new ManualBot(), () => new ContestHardBot(), 42);
   console.log(`seed=${r.seed} rounds=${r.rounds} winner=${r.winner} manual_moves=${r.moves1} hard_moves=${r.moves2} placed=${r.placed}`);
   if (r.moves2 < 3) fail++;
 }

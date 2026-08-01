@@ -19,7 +19,13 @@ import {
   type SerializedGameState,
   type StepEvent,
 } from './engine';
-import { HybridSearchBot, ManualBot, PureNnBot, RuleBot, SearchBot } from './bots';
+import {
+  ContestHardBot,
+  HybridSearchBot,
+  ManualBot,
+  PureNnBot,
+  RuleBot,
+} from './bots';
 import { loadPureNnPolicy, type PureNnPolicy } from './rnn';
 import type {
   BotId,
@@ -395,10 +401,9 @@ const lastPos = new Map<number, string>();
 const botOptions = [
   { id: 'manual', label: '手动', note: '由你用键盘或屏幕方向键操控。' },
   { id: 'easy', label: '简单', note: '官方 easy 规则：BFS 寻找最优格，速度固定为 1。' },
-  { id: 'hard', label: '困难', note: '官方 hard 规则：危险逃生 + 放弹安全判定 + 动态方向序。' },
-  { id: 'search', label: '搜索增强', note: '在困难规则基础上做浅层 rollout 搜索，仅在明显更优时改动作。' },
+  { id: 'hard', label: '困难', note: '比赛版 C++ hard：危险逃生、放弹安全判定和独立随机方向序。' },
+  { id: 'search', label: '搜索增强', note: '3 层 C++ rollout 搜索，叠加 RNN 小先验和地图派生随机种子。' },
   { id: 'nn', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
-  { id: 'hybrid', label: '神经网络+搜索', note: '搜索为主，叠加一个小权重的 NN 策略先验。' },
 ];
 const defaultSeatBots = ['easy', 'nn', 'easy', 'easy'];
 const modelUrl = new URL(
@@ -418,6 +423,7 @@ class BotWorkerClient {
   private readonly readyPromise: Promise<void>;
   private resolveReady!: () => void;
   private rejectReady!: (error: Error) => void;
+  private readySettled = false;
 
   constructor(
     readonly playerId: number,
@@ -433,12 +439,16 @@ class BotWorkerClient {
       this.resolveReady = resolve;
       this.rejectReady = reject;
     });
+    void this.readyPromise.catch(() => undefined);
     this.worker.addEventListener('message', (event: MessageEvent<BotWorkerResponse>) => {
       this.handleMessage(event.data);
     });
     this.worker.addEventListener('error', (event) => {
       const error = new Error(event.message || `玩家 ${playerId} Worker 运行失败`);
-      this.rejectReady(error);
+      if (!this.readySettled) {
+        this.readySettled = true;
+        this.rejectReady(error);
+      }
       this.rejectPending(error);
     });
     this.worker.postMessage({
@@ -473,18 +483,29 @@ class BotWorkerClient {
 
   terminate(): void {
     this.worker.terminate();
-    this.rejectPending(new Error('Bot Worker 已重置'));
+    const error = new Error('Bot Worker 已重置');
+    if (!this.readySettled) {
+      this.readySettled = true;
+      this.rejectReady(error);
+    }
+    this.rejectPending(error);
   }
 
   private handleMessage(message: BotWorkerResponse): void {
     if (message.generation !== this.generation) return;
     if (message.type === 'ready') {
+      this.readySettled = true;
       this.resolveReady();
       return;
     }
     if (message.type === 'error') {
       const error = new Error(message.message);
-      if (message.requestId == null) this.rejectReady(error);
+      if (message.requestId == null) {
+        if (!this.readySettled) {
+          this.readySettled = true;
+          this.rejectReady(error);
+        }
+      }
       else {
         const pending = this.pending.get(message.requestId);
         this.pending.delete(message.requestId);
@@ -530,11 +551,11 @@ function makeBot(id: string): BotController {
   switch (id) {
     case 'manual': return new ManualBot();
     case 'easy': return new RuleBot(false, 0);
-    case 'hard': return new RuleBot(true, 4);
-    case 'search': return new SearchBot(6, 2, 0.05);
+    case 'hard': return new ContestHardBot();
+    case 'search': return new HybridSearchBot(nnPolicy);
     case 'nn': return new PureNnBot(nnPolicy);
     case 'hybrid': return new HybridSearchBot(nnPolicy);
-    default: return new RuleBot(true, 4);
+    default: return new ContestHardBot();
   }
 }
 
@@ -578,11 +599,9 @@ void loadPureNnPolicy()
     nnPolicy = policy;
     modelStatus.classList.add('ready');
     modelText.textContent = '神经网络模型已加载';
-    resetGame();
   })
   .catch((err) => {
     modelText.textContent = `神经网络不可用：${String(err).slice(0, 60)}`;
-    resetGame();
   });
 
 function resetGame(): void {
@@ -739,7 +758,9 @@ function importMatch(payload: ExportedMatch): void {
   applyAdvancedControlValues(payload.controls.advanced);
   renderBotSelectors();
   botSelectors.querySelectorAll<HTMLSelectElement>('.seat-select').forEach((select, index) => {
-    select.value = payload.controls.bots[index] ?? defaultSeatBots[index] ?? 'hard';
+    const restoredBot =
+      payload.controls.bots[index] ?? defaultSeatBots[index] ?? 'hard';
+    select.value = restoredBot === 'hybrid' ? 'search' : restoredBot;
   });
   const restored: GameState = {
     config: { ...payload.state.config },
@@ -948,6 +969,10 @@ importFile.addEventListener('change', async () => {
     importMatch(JSON.parse(await file.text()) as ExportedMatch);
   } catch (error) {
     setError(`导入失败：${String(error).slice(0, 80)}`);
+  } finally {
+    canvas.dataset.importGeneration = String(
+      Number(canvas.dataset.importGeneration ?? 0) + 1,
+    );
   }
 });
 

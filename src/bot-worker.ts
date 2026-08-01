@@ -8,10 +8,10 @@ import {
   type GameState,
 } from './engine';
 import {
+  ContestHardBot,
   HybridSearchBot,
   PureNnBot,
   RuleBot,
-  SearchBot,
 } from './bots';
 import {
   loadPureNnPolicy,
@@ -103,9 +103,9 @@ function createBot(
     case 'easy':
       return new RuleBot(false, 0);
     case 'hard':
-      return new RuleBot(true, 4);
+      return new ContestHardBot();
     case 'search':
-      return new SearchBot(6, 2, 0.05);
+      return new HybridSearchBot(nnPolicy);
     case 'nn':
       return new PureNnBot(nnPolicy);
     case 'hybrid':
@@ -114,7 +114,7 @@ function createBot(
 }
 
 function needsModel(id: BotId): boolean {
-  return id === 'nn' || id === 'hybrid';
+  return id === 'search' || id === 'nn' || id === 'hybrid';
 }
 
 function post(message: BotWorkerResponse): void {

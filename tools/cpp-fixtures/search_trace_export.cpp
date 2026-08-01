@@ -35,6 +35,22 @@ void JsonDoubleVec(std::ostream &out, const std::vector<double> &values) {
   out << "]";
 }
 
+std::vector<int> PlayerOrder(const seedcup::GameMsg &msg) {
+  std::vector<int> order;
+  for (const auto &[id, player] : msg.players) {
+    if (player) order.push_back(id);
+  }
+  return order;
+}
+
+std::vector<int> BombOrder(const seedcup::GameMsg &msg) {
+  std::vector<int> order;
+  for (const auto &[id, bomb] : msg.bombs) {
+    if (bomb) order.push_back(id);
+  }
+  return order;
+}
+
 void JsonMsg(std::ostream &out, const seedcup::GameMsg &msg) {
   out << "{";
   out << "\"player_id\":" << msg.player_id << ",";
@@ -126,16 +142,18 @@ void JsonScoreBreakdown(std::ostream &out, const seedcup::GameMsg &msg,
 }
 
 void Configure(dl_bot::RuleSearchBot &bot, bool hybrid,
-               const std::string &model) {
+               const std::string &model, bool parallel) {
   bot.set_hard_mode(true);
-  bot.set_search_depth(6);
-  bot.set_search_rollouts(2);
+  bot.set_search_depth(hybrid ? 3 : 6);
+  bot.set_search_rollouts(hybrid ? 1 : 2);
   bot.set_min_rule_gap(0.05);
   bot.set_rollout_mode(0);
   bot.set_search_in_danger(false);
   bot.set_move_order_mode(4);
   bot.set_bomb_time(3);
+  bot.set_parallel_action_scoring(parallel);
   if (hybrid) {
+    bot.set_seed_move_rng_from_initial_map(true);
     bot.set_policy_prior_weight(0.005);
     if (!bot.LoadPolicyModel(model)) {
       std::cerr << "failed to load model\n";
@@ -147,14 +165,17 @@ void Configure(dl_bot::RuleSearchBot &bot, bool hybrid,
 } // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 6) {
-    std::cerr << "usage: search_trace <model> <seed> <steps> <hybrid 0/1> <out>\n";
+  if (argc < 6 || argc > 8) {
+    std::cerr << "usage: search_trace <model> <seed> <steps> <hybrid 0/1> "
+                 "<out> [search_first 0/1] [parallel 0/1]\n";
     return 1;
   }
   const std::string model = argv[1];
   const uint64_t seed = std::strtoull(argv[2], nullptr, 10);
   const int max_steps = std::max(1, std::atoi(argv[3]));
   const bool hybrid = std::atoi(argv[4]) != 0;
+  const bool search_first = argc == 6 || std::atoi(argv[6]) != 0;
+  const bool parallel = argc >= 8 && std::atoi(argv[7]) != 0;
   std::ofstream out(argv[5], std::ios::trunc);
   if (!out.is_open()) return 1;
 
@@ -163,15 +184,18 @@ int main(int argc, char **argv) {
   config.max_round = 400;
   dl_bot::GameSim sim(config);
   sim.Init();
-  const int search_id = sim.player_ids()[0];
-  const int opponent_id = sim.player_ids()[1];
+  const int search_id =
+      search_first ? sim.player_ids()[0] : sim.player_ids()[1];
+  const int opponent_id =
+      search_first ? sim.player_ids()[1] : sim.player_ids()[0];
 
   dl_bot::RuleSearchBot search;
-  Configure(search, hybrid, model);
+  Configure(search, hybrid, model, parallel);
   Bot opponent;
   opponent.set_hard_mode(true);
+  opponent.set_contest_rules(true);
   opponent.set_bomb_time(config.bomb_time);
-  opponent.set_move_order_mode(4);
+  opponent.set_move_order_mode(0);
   search.ResetForNewGame();
   opponent.ResetForNewGame();
   Bot::ResetMoveShuffleRngForThread();
@@ -188,6 +212,7 @@ int main(int argc, char **argv) {
     for (int sub = 0; sub < search_player->speed &&
                       emitted < max_steps; sub++) {
       auto snapshot = dl_bot::DeepCopyGameMsg(msg);
+      auto score_copy = dl_bot::DeepCopyGameMsg(msg);
       auto action = search.CalcOnce(msg, dummy);
       const auto &decision = search.last_decision();
       if (emitted) out << ",";
@@ -208,7 +233,15 @@ int main(int argc, char **argv) {
         first_tracker = false;
         out << "[" << bomb_id << "," << first_round << "]";
       }
-      out << "]}";
+      out << "],\"msg_player_order\":";
+      JsonIntVec(out, PlayerOrder(snapshot));
+      out << ",\"score_copy_player_order\":";
+      JsonIntVec(out, PlayerOrder(score_copy));
+      out << ",\"msg_bomb_order\":";
+      JsonIntVec(out, BombOrder(snapshot));
+      out << ",\"score_copy_bomb_order\":";
+      JsonIntVec(out, BombOrder(score_copy));
+      out << "}";
       emitted++;
       if (action != seedcup::SILENT) search_actions.push_back(action);
     }

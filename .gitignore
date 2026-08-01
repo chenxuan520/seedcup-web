@@ -25,6 +25,8 @@ e2e-*.png
 test-results/
 playwright-report/
 blob-report/
+.vitest-attachments/
+tests/__screenshots__/
 .cache/
 coverage/
 *.tmp

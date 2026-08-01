@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+
 const url = process.env.URL ?? 'http://localhost:5173/';
 
 async function main() {

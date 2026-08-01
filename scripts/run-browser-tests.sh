@@ -39,4 +39,5 @@ if ! curl --fail --silent --output /dev/null "$url"; then
 fi
 
 URL="$url" npx tsx scripts/advanced-check.ts
+URL="$url" npx tsx scripts/autoplay-check.ts
 URL="$url" npx tsx scripts/e2e.ts

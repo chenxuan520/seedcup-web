@@ -633,6 +633,26 @@ export function cppGameMsgPlayerOrder(state: GameState): number[] {
   return result.map((value) => value.id);
 }
 
+export function cppGameSimPlayerOrder(state: GameState): number[] {
+  const inserted = state.players.map((player) => ({ id: player.id }));
+  let bucketCount = 1;
+  let insertedCount = 0;
+  const result: Array<{ id: number }> = [];
+  for (const value of inserted) {
+    if (bucketCount === 1 || insertedCount + 1 >= bucketCount) {
+      bucketCount = nextGcc8BucketCount(bucketCount);
+      reorderForGcc8Rehash(result, bucketCount);
+    }
+    const bucket = positiveModulo(value.id, bucketCount);
+    const sameBucketIndex = result.findIndex(
+      (existing) => positiveModulo(existing.id, bucketCount) === bucket,
+    );
+    result.splice(sameBucketIndex < 0 ? 0 : sameBucketIndex, 0, value);
+    insertedCount++;
+  }
+  return result.map((value) => value.id);
+}
+
 export function bombAt(state: GameState, id: number | null): BombState | undefined {
   if (id == null) return undefined;
   return state.bombs.find((b) => b.id === id);
@@ -929,7 +949,7 @@ export function simulateClientAction(
   if (action === Action.Place) {
     const cell = state.cells[player.x][player.y];
     if (cell.block != null || cell.bombId != null) return;
-    const bombId = -1_000_000 - state.bombs.length;
+    const bombId = 2_147_483_646 - state.bombs.length;
     state.bombs.push({
       id: bombId,
       x: player.x,

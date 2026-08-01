@@ -230,8 +230,6 @@ async function main() {
     if (afterImportCards !== 4) problems.push(`import restored wrong player count: ${afterImportCards}`);
   }
 
-  await browser.close();
-
   if (errors.length) problems.push(`pageerror: ${errors.join(' | ')}`);
   if (consoleErrors.length) problems.push(`console: ${consoleErrors.slice(0, 3).join(' | ')}`);
   if (!modelText?.includes('已加载')) problems.push(`model not loaded: ${modelText}`);
@@ -255,8 +253,10 @@ async function main() {
 
   if (problems.length) {
     console.error('\nFAIL:\n - ' + problems.join('\n - '));
+    await browser.close();
     process.exit(1);
   }
+  await browser.close();
   console.log('\nOK: 2p/4p games, random map, seed reproducible, explosion fx, no errors');
 }
 

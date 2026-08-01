@@ -17,26 +17,36 @@
     "check:nn-sequence": "tsx scripts/check-nn-sequence.ts",
     "check:easy-parity": "tsx scripts/check-easy-parity.ts fixtures/easy_parity_seed42.json",
     "check:easy-multiplayer": "tsx scripts/check-easy-multiplayer-parity.ts fixtures/easy_multiplayer_seed20260801.json",
+    "check:hard-parity": "tsx scripts/check-hard-parity.ts fixtures/hard_parity_seed42.trace.json",
     "check:easy-safety": "tsx scripts/check-easy-safety.ts",
     "check:potion-weights": "tsx scripts/check-potion-weights.ts",
+    "check:cpp-gamesim-generation": "tsx scripts/check-cpp-gamesim-generation.ts fixtures/cpp_maps_seed1000.json",
     "check:server-generation": "tsx scripts/check-server-generation.ts fixtures/server_generation_seed20260731.json",
     "check:server-scenario": "tsx scripts/check-server-scenario.ts fixtures/server_scenario_seed20260731.json 20260731",
     "check:server-multiplayer": "tsx scripts/check-server-multiplayer.ts fixtures/server_multiplayer_seed20260731.json 20260731",
     "check:search-rule": "tsx scripts/check-search-parity.ts fixtures/search_rule_seed42.json",
     "check:search-hybrid": "tsx scripts/check-search-parity.ts fixtures/search_hybrid_seed42.json",
+    "check:search-games": "tsx scripts/check-search-game-trace.ts fixtures/search_game_hybrid_seed43_first.trace.json && tsx scripts/check-search-game-trace.ts fixtures/search_game_hybrid_seed43_second.trace.json",
     "test:bots": "tsx scripts/selftest-bots.ts",
     "test:speed": "tsx scripts/verify-speed.ts",
     "test:settings": "tsx scripts/advanced-check.ts",
+    "test:autoplay": "tsx scripts/autoplay-check.ts",
     "test:e2e": "tsx scripts/e2e.ts",
     "test:browser": "bash scripts/run-browser-tests.sh",
-    "test:all": "npm run build && npm run check:potion-weights && npm run check:server-generation && npm run check:server-scenario && npm run check:server-multiplayer && npm run check:nn-parity && npm run check:nn-sequence && npm run check:easy-parity && npm run check:easy-multiplayer && npm run check:search-rule && npm run check:search-hybrid && npm run test:speed && npm run test:bots",
+    "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:all": "npm run build && npm run check:potion-weights && npm run check:cpp-gamesim-generation && npm run check:server-generation && npm run check:server-scenario && npm run check:server-multiplayer && npm run check:nn-parity && npm run check:nn-sequence && npm run check:easy-parity && npm run check:easy-multiplayer && npm run check:hard-parity && npm run check:search-rule && npm run check:search-hybrid && npm run check:search-games && npm run test:speed && npm run test:bots",
+    "ci": "npm run test:coverage && npm run test:all && npm run test:browser",
     "preview": "vite preview"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
+    "@vitest/browser-playwright": "^4.1.10",
+    "@vitest/coverage-istanbul": "^4.1.10",
     "playwright": "^1.62.1",
     "tsx": "^4.23.1",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
   }
 }

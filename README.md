@@ -29,7 +29,7 @@
 | --- | --- |
 | 手动玩家 | 由键盘控制 |
 | 简单 | 对齐 C++ easy bot，每回合固定执行一个动作 |
-| 困难 | 对齐 C++ hard bot，包含危险逃生、放弹安全判定和动态方向序 |
+| 困难 | 对齐比赛提交 `c7cdf9e` 的 C++ hard bot，包含危险逃生、放弹安全判定和独立 glibc 随机方向序 |
 | 更强搜索 | 在规则状态评估上进行有限深度搜索 |
 | 纯神经网络 | 仅使用 RNN 策略输出，并执行与 C++ 一致的动作合法性过滤 |
 | 神经网络加搜索 | 搜索为主，使用同一 RNN 策略作为小权重先验 |
@@ -143,7 +143,7 @@ SEEDCUP_MODEL=/path/to/model.rnn npm run prepare:model
 推荐展示组合：
 
 - 简单机器人 对 纯神经网络：默认组合，直接观看训练模型效果
-- 更强搜索 对 困难：展示规则和搜索效果
+- 搜索增强 对 困难：展示浅层 rollout 与 RNN 先验；这是实验策略，不代表真实服务端强于困难
 - 纯神经网络 对 简单：展示独立 NN 策略
 - 手动玩家 对 困难或更强搜索：体验实际对战
 
@@ -156,8 +156,8 @@ npm run test:all
 ```
 
 该命令依次执行生产构建、官方服务端地图/RNG/规则/4 人场景对拍、搜索与混合
-搜索对拍、单帧和连续 NN 对拍、比赛版 easy 两人/四人动作对拍、速度规则检查
-以及 bot 无卡死测试。
+搜索对拍、单帧和连续 NN 对拍、比赛版 easy 两人/四人动作对拍、比赛版 hard
+连续动作对拍、搜索正反手整局对拍、速度规则检查以及 bot 无卡死测试。
 
 浏览器 E2E 会自行启动临时预览服务，验证 2 人和 4 人对局、随机地图、种子复现、爆炸效果、高级设置以及导出导入：
 
@@ -175,11 +175,14 @@ npm run test:browser
 - 40 步输出概率最大误差为 `1.734723475976807e-18`
 - 40 步 top action 不一致数为 `0`
 - 比赛版 C++ easy（提交 `c7cdf9e`）与 TypeScript easy：两人连续 `47` 步、四人连续 `236` 步动作不一致数均为 `0`
-- C++ RuleSearch/HybridSearch 共 `240` 个子步的 baseline、chosen、最终动作、六个候选分数和炸弹 tracker 不一致数为 `0`
+- 比赛版 C++ hard（提交 `c7cdf9e`）与 TypeScript hard：连续 `217` 个动作及状态摘要不一致数为 `0`
+- C++ RuleSearch/HybridSearch 共 `224` 个子步的 baseline、chosen、最终动作、六个候选分数和炸弹 tracker 不一致数为 `0`
+- HybridSearch 对比赛版 hard 的正反手整局 `100 / 62` 回合动作、搜索决策和完整状态摘要不一致数为 `0`
 - easy 安全脚本仅报告自炸、推弹和到达顺序竞态，不作为修改比赛版算法的依据；easy 的唯一硬门槛是 C++ 动作逐项一致
 - 同 `seed=1000..1059`、同 C++ `GameSim` 裁判下，C++/TypeScript 的 winner 和结束回合均为 `60 / 60` 一致
+- 生产 `src` 覆盖率：statements `97.37%`、branches `90.66%`、functions `98.32%`、lines `98.72%`
 
-当前留档胜率用于回归，不代表所有地图和参数下的保证值：
+以下模型胜率仅描述对应裁判和参数，不代表搜索增强已经战胜 hard：
 
 | 评估 | 结果 |
 | --- | --- |
@@ -187,6 +190,11 @@ npm run test:browser
 | C++，同 seed、同 `GameSim`、NN 固定 P1、纯 NN 对比赛版 easy | 53 / 60，88.33% |
 | 网页随机地图 paired，纯 NN 对 easy | 97 / 120，80.83% |
 | 网页随机地图，纯 NN 对 hard | 15 / 60，25.0% |
+
+搜索增强在原 C++ 服务端上的固定 seed 正反手配对结果为 `2 / 10`。因此当前
+搜索增强只作为算法实验展示，不能宣称真实服务端强于比赛版 hard。完整根因、
+评测口径和整改过程见
+[事故复盘与工程整改报告](docs/事故复盘与工程整改报告.md)。
 
 ## 对齐方法
 
@@ -220,7 +228,10 @@ scripts/check-easy-parity.ts   比赛版 C++/TypeScript easy 两人动作对拍
 scripts/check-easy-multiplayer-parity.ts  比赛版 easy 四人连续动作对拍
 scripts/check-easy-safety.ts   easy 风险观测，不改变原算法
 scripts/check-server-*.ts      官方服务端生成、规则与 4 人场景对拍
+scripts/check-hard-parity.ts   比赛版 hard 连续动作与状态摘要对拍
 scripts/check-search-parity.ts RuleSearch/HybridSearch 子步级对拍
+scripts/check-search-game-trace.ts  HybridSearch 正反手整局对拍
+scripts/eval-real-server-hybrid.sh  原 C++ 服务端固定 seed 配对评测
 tools/cpp-fixtures/            C++ fixture 生成器与复现说明
 scripts/run-browser-tests.sh   自启动服务的浏览器 E2E
 ```

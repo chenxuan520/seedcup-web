@@ -71,6 +71,58 @@ g++ -O3 -DNDEBUG -std=gnu++17 \
 状态。TypeScript 对拍要求 baseline、chosen、最终动作、六个候选分数和炸弹
 tracker 全部一致；混合版本的 RNN prior 允许 `1e-9` 以内的浮点舍入误差。
 
+### 比赛版 hard fixture
+
+用户可见 hard 的唯一权威实现与 easy 相同，锁定为提交 `c7cdf9e`，但编译时增加
+`-DHARD`。先导出历史头文件，再生成连续动作 fixture：
+
+```bash
+cd ../seedcup-cppsdk
+mkdir -p /tmp/contest-hard
+git show c7cdf9e:src/bot.h > /tmp/contest-hard/bot.h
+
+g++ -O3 -DNDEBUG -DHARD -std=gnu++17 \
+  -I /tmp/contest-hard -I src/util -I src \
+  -I src/third_party/deeplearning/src/deeplearning \
+  -I src/third_party/deeplearning/src \
+  ../seedcup-web/tools/cpp-fixtures/contest_hard_trace_export.cpp \
+  src/build/libdl_bot_lib.a src/build/libdeeplearning_static.a \
+  -lpthread -o /tmp/contest_hard_trace
+
+/tmp/contest_hard_trace 42 120 \
+  ../seedcup-web/fixtures/hard_parity_seed42.json
+```
+
+仓库提交的是由原始 JSON 转换出的紧凑
+`hard_parity_seed42.trace.json`。它记录每个 substep 的动作和 canonical 状态
+hash，避免提交重复地图数据；TypeScript 从 seed 重建完整状态后逐步校验。
+
+### 搜索整局 fixture
+
+`search_game_trace_export.cpp` 同时驱动 HybridSearch 和比赛版 hard，导出双方动作、
+每个搜索 substep 的六动作分数、RNN prior、炸弹 tracker 和回合后状态。
+
+```bash
+g++ -O3 -DNDEBUG -std=gnu++17 \
+  -I src/util -I src \
+  -I src/third_party/deeplearning/src/deeplearning \
+  -I src/third_party/deeplearning/src \
+  ../seedcup-web/tools/cpp-fixtures/search_game_trace_export.cpp \
+  src/build/libdl_bot_lib.a src/build/libdeeplearning_static.a \
+  -lpthread -o /tmp/search_game_trace_export
+
+/tmp/search_game_trace_export \
+  src/dl_bot_model_hard_rnnh512_actionctx_exactcf_head128_anchor075_mix050.rnn \
+  43 100 1 1 /tmp/search-first.json
+
+/tmp/search_game_trace_export \
+  src/dl_bot_model_hard_rnnh512_actionctx_exactcf_head128_anchor075_mix050.rnn \
+  43 100 1 0 /tmp/search-second.json
+```
+
+提交到仓库前将完整状态转换为 canonical SHA-256 摘要。目前正反手 fixture 分别覆盖
+`100` 和 `62` 回合，动作、搜索决策和状态摘要必须全部一致。
+
 ## 比赛版 easy fixture
 
 easy 的唯一权威实现锁定为 C++ SDK 提交 `c7cdf9e`（`feat:添加手套`）中的

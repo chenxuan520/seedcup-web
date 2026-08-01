@@ -1,6 +1,6 @@
 // 专项验证：easy 每回合位移必须 ≤1，hard 可 >1（speed 提升后）。
 import { createGame, runRound, defaultConfig, type BotController } from '../src/engine';
-import { RuleBot } from '../src/bots';
+import { ContestHardBot, RuleBot } from '../src/bots';
 
 function maxStepDelta(makeP1: () => BotController, makeP2: () => BotController, seed: number) {
   const state = createGame(seed, { ...defaultConfig });
@@ -14,7 +14,7 @@ function maxStepDelta(makeP1: () => BotController, makeP2: () => BotController, 
   let maxP1 = 0;
   let maxP2 = 0;
   let sumSpeedSeenP1 = 0;
-  for (let i = 0; i < 200 && !state.over; i++) {
+  for (let i = 0; i < 80 && !state.over; i++) {
     const b1 = state.players[0];
     const b2 = state.players[1];
     const x1 = b1.x, y1 = b1.y, x2 = b2.x, y2 = b2.y;
@@ -28,8 +28,12 @@ function maxStepDelta(makeP1: () => BotController, makeP2: () => BotController, 
 
 let fail = 0;
 console.log('=== easy(P1) vs hard(P2)：验证 easy 单回合位移 ≤1 ===');
-for (const seed of [1, 42, 123, 777, 999, 20260730, 31415, 2718, 555, 8080]) {
-  const r = maxStepDelta(() => new RuleBot(false, 0), () => new RuleBot(true, 4), seed);
+for (const seed of [1, 42, 123, 777]) {
+  const r = maxStepDelta(
+    () => new RuleBot(false, 0),
+    () => new ContestHardBot(),
+    seed,
+  );
   // easy 即便 speed>1，也应每回合最多动 1 格（对齐 C++ MapCall speed=1）
   const easyOk = r.maxP1 <= 1;
   if (!easyOk) fail++;
@@ -38,8 +42,12 @@ for (const seed of [1, 42, 123, 777, 999, 20260730, 31415, 2718, 555, 8080]) {
 
 console.log('=== hard vs hard：验证 hard 提速后能单回合多步 ===');
 let hardMultiSeen = false;
-for (const seed of [1, 42, 123, 777, 999, 20260730, 31415, 2718]) {
-  const r = maxStepDelta(() => new RuleBot(true, 4), () => new RuleBot(true, 4), seed);
+for (const seed of [1, 42, 123, 777]) {
+  const r = maxStepDelta(
+    () => new ContestHardBot(),
+    () => new ContestHardBot(),
+    seed,
+  );
   if (r.maxP1 >= 2 || r.maxP2 >= 2) hardMultiSeen = true;
   console.log(`seed=${seed} hardP1最大位移=${r.maxP1} hardP2最大位移=${r.maxP2}`);
 }

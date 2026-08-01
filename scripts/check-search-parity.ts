@@ -38,6 +38,7 @@ const fixture = JSON.parse(
 const first = fixture.steps[0];
 if (!first) throw new Error('empty search fixture');
 const initial = fixtureMessageToState(fixture.seed, first.msg);
+normalizeGameSimPlayerInsertionOrder(initial);
 const policy = fixture.hybrid
   ? loadPureNnPolicyFromText(readFileSync(modelPath, 'utf8'))
   : null;
@@ -56,6 +57,7 @@ let trackerMismatches = 0;
 for (let index = 0; index < fixture.steps.length; index++) {
   const expected = fixture.steps[index];
   const state = fixtureMessageToState(fixture.seed, expected.msg);
+  normalizeGameSimPlayerInsertionOrder(state);
   const action = bot.chooseAction(
     state,
     fixture.player_id,
@@ -128,6 +130,12 @@ for (let index = 0; index < fixture.steps.length; index++) {
       `ts=${decision.priors[action]} cpp=${expected.priors[action]}`;
   }
 
+}
+
+function normalizeGameSimPlayerInsertionOrder(
+  state: ReturnType<typeof fixtureMessageToState>,
+): void {
+  state.players.sort((left, right) => left.id - right.id);
 }
 
 console.log(

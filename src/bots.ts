@@ -103,6 +103,7 @@ export class RuleBot implements BotController {
     readonly hard = false,
     readonly orderMode = 0,
     moveShuffleRng?: CppMt19937,
+    private readonly contestRules = false,
   ) {
     this.label = hard ? '困难 (hard)' : '简单 (easy)';
     this.ownsMoveShuffleRng = moveShuffleRng == null;
@@ -157,11 +158,18 @@ export class RuleBot implements BotController {
       this.applyDynamicMoveOrder(player.x, player.y);
     }
 
-    if (!this.hard && this.orderMode === 0) {
+    if (this.contestRules) {
+      this.contestShuffleRng.randomShuffle(this.moveGap);
+    } else if (!this.hard && this.orderMode === 0) {
       this.contestShuffleRng.randomShuffle(this.moveGap);
     }
     const dangerous = this.signDangerous(state, player);
-    if (this.hard && !dangerous && this.orderMode === 0) {
+    if (
+      this.hard &&
+      !this.contestRules &&
+      !dangerous &&
+      this.orderMode === 0
+    ) {
       this.shuffleMoveGap();
     }
     const oper = dangerous
@@ -299,7 +307,7 @@ export class RuleBot implements BotController {
           }
           return operLast;
         }
-        if (this.hard) pass[x][y] = 1;
+        if (this.hard && !this.contestRules) pass[x][y] = 1;
         queue.push([x, y, operLast]);
       }
     }
@@ -442,7 +450,7 @@ export class RuleBot implements BotController {
   private canPlaceBomb(state: GameState, player: PlayerState, px: number, py: number): boolean {
     const effectiveSpeed = this.hard ? player.speed : 1;
     const stepMax = effectiveSpeed * state.config.bombTime;
-    if (!this.hard) {
+    if (!this.hard || this.contestRules) {
       return this.canPlaceBombEasyOriginal(
         state,
         player,
@@ -564,6 +572,12 @@ export class RuleBot implements BotController {
   }
 }
 
+export class ContestHardBot extends RuleBot {
+  constructor() {
+    super(true, 0, undefined, true);
+  }
+}
+
 function playerAtCell(state: GameState, x: number, y: number): boolean {
   return state.players.some((p) => p.alive && p.x === x && p.y === y);
 }
@@ -595,6 +609,7 @@ export class SearchBot extends RuleBot {
   private searchEnemyInit: [number, number] | null = null;
   private readonly bombFirstSeenRound = new Map<number, number>();
   private readonly searchMoveRng: CppMt19937;
+  private readonly seedMoveRngFromInitialMap: boolean;
 
   constructor(
     depth = 6,
@@ -602,6 +617,7 @@ export class SearchBot extends RuleBot {
     minRuleGap = 0.05,
     policy: PureNnPolicy | null = null,
     policyPriorWeight = 0,
+    seedMoveRngFromInitialMap = false,
   ) {
     const searchMoveRng = new CppMt19937();
     super(true, 4, searchMoveRng);
@@ -611,10 +627,16 @@ export class SearchBot extends RuleBot {
     this.minRuleGap = minRuleGap;
     this.policy = policy;
     this.policyPriorWeight = policyPriorWeight;
+    this.seedMoveRngFromInitialMap = seedMoveRngFromInitialMap;
   }
 
   override reset(playerId: number, state: GameState): void {
     super.reset(playerId, state);
+    this.searchMoveRng.reseed(
+      this.seedMoveRngFromInitialMap
+        ? initialMapSeed(state)
+        : 0x9e3779b9,
+    );
     const self = state.players.find((player) => player.id === playerId);
     const enemy = state.players.find((player) => player.id !== playerId);
     this.searchSelfInit = self ? [self.x, self.y] : null;
@@ -769,7 +791,7 @@ export class SearchBot extends RuleBot {
       );
       if (!opponent) continue;
       const ruleSelf = new RuleBot(true, 4, this.searchMoveRng);
-      const ruleOpponent = new RuleBot(true, 0, this.searchMoveRng);
+      const ruleOpponent = new ContestHardBot();
       ruleSelf.reset(playerId, sim);
       ruleOpponent.reset(opponent.id, sim);
       ruleSelf.setInitialPositions(
@@ -1029,11 +1051,34 @@ export function isPureNnActionLegal(
 }
 
 export class HybridSearchBot extends SearchBot {
-  readonly label = 'NN + 搜索';
+  readonly label = '搜索增强';
 
   constructor(policy: PureNnPolicy | null) {
-    super(6, 2, 0.05, policy, 0.005);
+    super(3, 1, 0.05, policy, 0.005, true);
   }
+}
+
+function initialMapSeed(state: GameState): number {
+  let hash = 2166136261;
+  const mix = (value: number): void => {
+    hash ^= value >>> 0;
+    hash = Math.imul(hash, 16777619) >>> 0;
+  };
+  mix(state.config.size);
+  for (const row of state.cells) {
+    for (const cell of row) {
+      mix(cell.block === 'mud' ? 2 : cell.block === 'wall' ? 1 : 0);
+      mix(cell.item);
+    }
+  }
+  const positions = state.players
+    .map((player) => [player.x, player.y] as const)
+    .sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  for (const [x, y] of positions) {
+    mix(x);
+    mix(y);
+  }
+  return hash >>> 0;
 }
 
 export { inBounds };

@@ -3,6 +3,7 @@ import {
   BombStatus,
   Item,
   Rng,
+  cppGameSimPlayerOrder,
   createCppGameSimGame,
   type BlockMeta,
   type GameState,
@@ -19,8 +20,10 @@ const moveDelta: Record<Action, [number, number]> = {
 };
 
 const cppBombBucketCount = Symbol('cppBombBucketCount');
+const cppPlayerOrder = Symbol('cppPlayerOrder');
 type CppRolloutState = GameState & {
   [cppBombBucketCount]: number;
+  [cppPlayerOrder]?: number[];
 };
 
 export function initializeCppGameSimState(
@@ -54,6 +57,10 @@ export function createCppRolloutState(
   seed: number,
   maxRound: number,
 ): GameState {
+  const playerById = new Map(
+    source.players.map((player) => [player.id, player]),
+  );
+  const playerOrder = cppGameSimPlayerOrder(source);
   const state: CppRolloutState = {
     config: {
       ...source.config,
@@ -91,6 +98,7 @@ export function createCppRolloutState(
     bombBucketCount: 1,
     rng: new Rng(seed),
     [cppBombBucketCount]: 1,
+    [cppPlayerOrder]: playerOrder.filter((id) => playerById.has(id)),
   };
 
   // GameSim uses GCC 8 libstdc++ unordered_map<int, ...>. Its iteration order
@@ -153,7 +161,10 @@ export function stepCppRollout(
   );
   // createCppRolloutState preserves the GameMsg unordered-map iteration order,
   // exactly as GameSim::LoadFromMsg stores it in player_ids_.
-  const order = state.players.map((player) => player.id);
+  const order = [
+    ...((state as CppRolloutState)[cppPlayerOrder] ??
+      state.players.map((player) => player.id)),
+  ];
   if (state.round & 1) order.reverse();
 
   for (let sub = 0; sub < maxSpeed; sub++) {
