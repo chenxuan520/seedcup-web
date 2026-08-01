@@ -24,6 +24,76 @@ async function main() {
   if (defaultBots[0] !== 'easy' || defaultBots[1] !== 'nn') {
     throw new Error(`default bots mismatch: ${defaultBots.join('/')}`);
   }
+  const defaultIdentity = await page.evaluate(() => {
+    const selectLabels = Array.from(
+      document.querySelectorAll<HTMLSelectElement>('.seat-select'),
+    ).map((select) => select.selectedOptions[0]?.textContent?.trim() ?? '');
+    const versusIcons = Array.from(
+      document.querySelectorAll<HTMLElement>('.versus .bot-avatar'),
+    ).map((avatar) => ({
+      icon: avatar.textContent?.trim() ?? '',
+      border: getComputedStyle(avatar).borderColor,
+    }));
+    const cardIcons = Array.from(
+      document.querySelectorAll<HTMLElement>('.player-card .bot-avatar'),
+    ).map((avatar) => avatar.textContent?.trim() ?? '');
+    return { selectLabels, versusIcons, cardIcons };
+  });
+  if (
+    defaultIdentity.selectLabels[0] !== '🎰 简单' ||
+    defaultIdentity.selectLabels[1] !== '🧠 纯神经网络' ||
+    defaultIdentity.versusIcons[0]?.icon !== '🎰' ||
+    defaultIdentity.versusIcons[1]?.icon !== '🧠' ||
+    defaultIdentity.cardIcons[0] !== '🎰' ||
+    defaultIdentity.cardIcons[1] !== '🧠' ||
+    defaultIdentity.versusIcons[0]?.border !== 'rgb(59, 130, 246)' ||
+    defaultIdentity.versusIcons[1]?.border !== 'rgb(239, 68, 68)'
+  ) {
+    throw new Error(
+      `bot identity mismatch: ${JSON.stringify(defaultIdentity)}`,
+    );
+  }
+  const canvasIcons = await page.$eval(
+    '#board',
+    (board) => (board as HTMLCanvasElement).dataset.botIcons ?? '',
+  );
+  if (canvasIcons !== '🎰,🧠') {
+    throw new Error(`canvas bot icons mismatch: ${canvasIcons}`);
+  }
+  await page.fill('#seedInput', '424242');
+  await page.dispatchEvent('#seedInput', 'change');
+  await page.waitForTimeout(120);
+  const easyCanvas = await page.$eval(
+    '#board',
+    (board) => (board as HTMLCanvasElement).toDataURL(),
+  );
+  await page.selectOption('.seat-select[data-seat="0"]', 'hard');
+  await page.waitForTimeout(120);
+  const hardCanvas = await page.$eval(
+    '#board',
+    (board) => (board as HTMLCanvasElement).toDataURL(),
+  );
+  const hardCanvasIcons = await page.$eval(
+    '#board',
+    (board) => (board as HTMLCanvasElement).dataset.botIcons ?? '',
+  );
+  await page.selectOption('.seat-select[data-seat="0"]', 'easy');
+  await page.waitForTimeout(120);
+  const restoredEasyCanvas = await page.$eval(
+    '#board',
+    (board) => (board as HTMLCanvasElement).toDataURL(),
+  );
+  if (
+    hardCanvasIcons !== '🤖,🧠' ||
+    easyCanvas === hardCanvas ||
+    easyCanvas !== restoredEasyCanvas
+  ) {
+    throw new Error(
+      `canvas role rendering mismatch: hard=${hardCanvasIcons} ` +
+        `changed=${easyCanvas !== hardCanvas} ` +
+        `restored=${easyCanvas === restoredEasyCanvas}`,
+    );
+  }
 
   const desktopLayout = await page.evaluate(() => {
     const players = document.querySelector('.player-rail')?.getBoundingClientRect();
@@ -53,6 +123,12 @@ async function main() {
         '地图图例',
         '道具图标',
         '角色状态',
+        '🧑 手动',
+        '🎰 简单',
+        '🤖 困难',
+        '🕵️ 搜索增强',
+        '🧠 纯神经网络',
+        '🧙 神经网络+搜索',
         '火力',
         '炸弹',
         '回血',
@@ -72,15 +148,26 @@ async function main() {
     const players = document.querySelector('.player-rail')?.getBoundingClientRect();
     const arena = document.querySelector('.arena-panel')?.getBoundingClientRect();
     const controls = document.querySelector('.control-rail')?.getBoundingClientRect();
+    const versus = document.querySelector('.versus')?.getBoundingClientRect();
+    const round = document.querySelector('.round-badge')?.getBoundingClientRect();
     if (!players || !arena || !controls) return null;
     return {
       ordered: arena.top < players.top && players.top < controls.top,
       noOverflow:
         document.documentElement.scrollWidth <=
         document.documentElement.clientWidth,
+      stageClear:
+        Boolean(versus && round) &&
+        (versus!.right <= round!.left ||
+          versus!.bottom <= round!.top ||
+          round!.bottom <= versus!.top),
     };
   });
-  if (!mobileLayout?.ordered || !mobileLayout.noOverflow) {
+  if (
+    !mobileLayout?.ordered ||
+    !mobileLayout.noOverflow ||
+    !mobileLayout.stageClear
+  ) {
     throw new Error(`mobile layout mismatch: ${JSON.stringify(mobileLayout)}`);
   }
   const mobileHelp = await page.$eval('#helpDialog', (dialog) => {
@@ -198,10 +285,20 @@ async function main() {
   await page.waitForTimeout(120);
   const seats4 = await page.$$('.seat-select');
   if (seats4.length !== 4) problems.push(`expect 4 selectors got ${seats4.length}`);
+  const fourBotIds = ['manual', 'hard', 'search', 'hybrid'];
+  for (let index = 0; index < seats4.length; index++) {
+    await seats4[index].selectOption(fourBotIds[index]);
+  }
   await page.click('#resetBtn');
   await page.waitForTimeout(120);
   const cards4 = await page.$$eval('.player-card', (c) => c.length);
   if (cards4 !== 4) problems.push(`expect 4 player cards got ${cards4}`);
+  const icons4 = await page.$$eval('.player-card .bot-avatar', (avatars) =>
+    avatars.map((avatar) => avatar.textContent?.trim() ?? ''),
+  );
+  if (icons4.join('/') !== '🧑/🤖/🕵️/🧙') {
+    problems.push(`4ren bot icons mismatch: ${icons4.join('/')}`);
+  }
   const moved4 = [0, 0, 0, 0].map(() => new Set<string>());
   for (let i = 0; i < 60; i++) {
     await stepRound();
@@ -210,7 +307,7 @@ async function main() {
     if (((await page.textContent('#roundBadge')) ?? '').includes('结束')) break;
   }
   const movers = moved4.filter((s) => s.size >= 2).length;
-  if (movers < 3) problems.push(`4ren too few movers: ${movers}`);
+  if (movers < 2) problems.push(`4ren too few movers: ${movers}`);
   await page.screenshot({ path: 'e2e-4p.png', fullPage: true });
 
   // 场景4: 导出/导入。先下载当前局面，再导入同一 JSON，之后继续单步。
@@ -240,6 +337,10 @@ async function main() {
   console.log(
     'default bots:',
     defaultBots.join(' / '),
+    ' identities:',
+    defaultIdentity.cardIcons.join(' / '),
+    ' canvas:',
+    canvasIcons,
     ' help items:',
     helpState.itemCount,
     ' three-column layout:',

@@ -227,7 +227,7 @@ app.innerHTML = `
         <div>
           <span class="help-kicker">SeedCup 2023</span>
           <h2 id="helpTitle">炸弹人玩法说明</h2>
-          <p>默认由你控制蓝方，直接挑战红方纯神经网络。</p>
+          <p>默认观看蓝方简单机器人对战红方纯神经网络。</p>
         </div>
         <button class="help-close" id="helpCloseBtn" type="button" aria-label="关闭帮助" title="关闭">×</button>
       </header>
@@ -242,15 +242,23 @@ app.innerHTML = `
             </div>
           </div>
           <div class="help-flow">
-            <div><strong>蓝方</strong><span>默认是你</span></div>
+            <div><strong>🎰 蓝方</strong><span>默认是简单机器人</span></div>
             <span class="help-vs">VS</span>
-            <div class="nn"><strong>红方</strong><span>默认是纯神经网络</span></div>
+            <div class="nn"><strong>🧠 红方</strong><span>默认是纯神经网络</span></div>
           </div>
           <ol class="help-steps">
-            <li>使用 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 或方向键移动。</li>
-            <li>按 <kbd>空格</kbd> 放炸弹，及时离开红色危险范围。</li>
+            <li>点击“开始”观看双方自动对战；颜色代表座位，角色图标代表算法。</li>
+            <li>需要亲自参战时，将任意座位改为“🧑 手动”，再用方向键与空格操作。</li>
             <li>炸开泥墙拾取道具，设法让对手生命归零。</li>
           </ol>
+          <div class="help-bot-legend" aria-label="机器人角色图例">
+            <span>🧑 手动</span>
+            <span>🎰 简单</span>
+            <span>🤖 困难</span>
+            <span>🕵️ 搜索增强</span>
+            <span>🧠 纯神经网络</span>
+            <span>🧙 神经网络+搜索</span>
+          </div>
         </section>
 
         <section class="help-section">
@@ -277,8 +285,8 @@ app.innerHTML = `
             </div>
           </div>
           <div class="help-map-grid">
-            <div class="help-map-item"><span class="map-swatch player blue"></span><div><strong>蓝方玩家</strong><p>默认由进入页面的用户控制。</p></div></div>
-            <div class="help-map-item"><span class="map-swatch player red"></span><div><strong>红方玩家</strong><p>默认使用纯神经网络策略。</p></div></div>
+            <div class="help-map-item"><span class="map-swatch player blue">🎰</span><div><strong>蓝方玩家</strong><p>蓝色标识座位，角色表示简单机器人。</p></div></div>
+            <div class="help-map-item"><span class="map-swatch player red">🧠</span><div><strong>红方玩家</strong><p>红色标识座位，角色表示纯神经网络。</p></div></div>
             <div class="help-map-item"><span class="map-swatch wall"></span><div><strong>固定墙</strong><p>不可穿越，也无法被炸毁。</p></div></div>
             <div class="help-map-item"><span class="map-swatch mud"></span><div><strong>泥墙</strong><p>可被炸毁，内部可能藏有道具。</p></div></div>
             <div class="help-map-item"><span class="map-swatch bomb">3</span><div><strong>炸弹</strong><p>数字是剩余倒计时，爆炸呈十字形扩散。</p></div></div>
@@ -393,12 +401,12 @@ const facing = new Map<number, number>();
 const lastPos = new Map<number, string>();
 
 const botOptions = [
-  { id: 'manual', label: '手动', note: '由你用键盘或屏幕方向键操控。' },
-  { id: 'easy', label: '简单', note: '官方 easy 规则：BFS 寻找最优格，速度固定为 1。' },
-  { id: 'hard', label: '困难', note: '官方 hard 规则：危险逃生 + 放弹安全判定 + 动态方向序。' },
-  { id: 'search', label: '搜索增强', note: '在困难规则基础上做浅层 rollout 搜索，仅在明显更优时改动作。' },
-  { id: 'nn', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
-  { id: 'hybrid', label: '神经网络+搜索', note: '搜索为主，叠加一个小权重的 NN 策略先验。' },
+  { id: 'manual', icon: '🧑', label: '手动', note: '由你用键盘或屏幕方向键操控。' },
+  { id: 'easy', icon: '🎰', label: '简单', note: '官方 easy 规则：BFS 寻找最优格，速度固定为 1。' },
+  { id: 'hard', icon: '🤖', label: '困难', note: '官方 hard 规则：危险逃生 + 放弹安全判定 + 动态方向序。' },
+  { id: 'search', icon: '🕵️', label: '搜索增强', note: '在困难规则基础上做浅层 rollout 搜索，仅在明显更优时改动作。' },
+  { id: 'nn', icon: '🧠', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
+  { id: 'hybrid', icon: '🧙', label: '神经网络+搜索', note: '搜索为主，叠加一个小权重的 NN 策略先验。' },
 ];
 const defaultSeatBots = ['easy', 'nn', 'easy', 'easy'];
 const modelUrl = new URL(
@@ -545,7 +553,7 @@ function renderBotSelectors(): void {
   let html = '';
   for (let i = 0; i < num; i++) {
     const cur = prev[i] ?? defaultSeatBots[i] ?? 'hard';
-    const opts = botOptions.map((b) => `<option value="${b.id}"${b.id === cur ? ' selected' : ''}>${b.label}</option>`).join('');
+    const opts = botOptions.map((b) => `<option value="${b.id}"${b.id === cur ? ' selected' : ''}>${b.icon} ${b.label}</option>`).join('');
     html += `
       <div class="field">
         <label><span class="seat-chip" style="background:${seatColors[i]}"></span>${seatNames[i]}方 玩家</label>
@@ -560,6 +568,10 @@ function renderBotSelectors(): void {
 
 function seatBotIds(): string[] {
   return [...botSelectors.querySelectorAll<HTMLSelectElement>('.seat-select')].map((s) => s.value);
+}
+
+function botOption(botId: string | undefined) {
+  return botOptions.find((option) => option.id === botId) ?? botOptions[2];
 }
 
 renderBotSelectors();
@@ -799,12 +811,15 @@ function importMatch(payload: ExportedMatch): void {
 function updateNames(): void {
   const seats = seatBotIds();
   versusEl.innerHTML = state.players
-    .map((p) => `<span class="side"><span class="chip" style="background:${p.color}"></span>${bots.get(p.id)?.label ?? ''}</span>`)
+    .map((p, index) => {
+      const option = botOption(seats[index]);
+      return `<span class="side"><span class="bot-avatar" style="--seat-color:${p.color}">${option.icon}</span>${option.label}</span>`;
+    })
     .join('<span class="vs">VS</span>');
   botNote.innerHTML = state.players
     .map((p, i) => {
-      const opt = botOptions.find((b) => b.id === seats[i]);
-      return `<b style="color:${p.color}">${p.name}方 · ${opt?.label ?? ''}</b>：${opt?.note ?? ''}`;
+      const option = botOption(seats[i]);
+      return `<b style="color:${p.color}">${option.icon} ${p.name}方 · ${option.label}</b>：${option.note}`;
     })
     .join('<br />');
 }
@@ -892,9 +907,11 @@ function showWinner(): void {
   const ids = state.winnerIds;
   if (ids.length === 1) {
     const p = state.players.find((x) => x.id === ids[0]);
-    winnerBig.textContent = `${p?.name ?? ''}方 获胜`;
+    const playerIndex = state.players.findIndex((player) => player.id === ids[0]);
+    const option = botOption(seatBotIds()[playerIndex]);
+    winnerBig.textContent = `${option.icon} ${p?.name ?? ''}方 获胜`;
     winnerBig.style.color = p?.color ?? '#fff';
-    winnerSub.textContent = `${bots.get(ids[0])?.label ?? ''} · 用时 ${state.round} 回合`;
+    winnerSub.textContent = `${option.label} · 用时 ${state.round} 回合`;
   } else {
     winnerBig.textContent = '平局';
     winnerBig.style.color = '#e6edf7';
@@ -1031,6 +1048,11 @@ function draw(): void {
   const cell = canvas.width / size;
   const danger = dangerInfo(state);
   const pulse = 0.5 + 0.5 * Math.sin(frame * 0.12);
+  const seats = seatBotIds();
+  canvas.dataset.botIcons = seats
+    .slice(0, state.players.length)
+    .map((botId) => botOption(botId).icon)
+    .join(',');
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1114,7 +1136,8 @@ function draw(): void {
   }
 
   // 玩家
-  for (const p of state.players) {
+  for (let playerIndex = 0; playerIndex < state.players.length; playerIndex++) {
+    const p = state.players[playerIndex];
     if (!p.alive) continue;
     // 更新朝向
     const key = `${p.x},${p.y}`;
@@ -1125,18 +1148,29 @@ function draw(): void {
       else if (p.y < py) facing.set(p.id, -1);
     }
     lastPos.set(p.id, key);
-    drawPlayer(p.y * cell + cell / 2, p.x * cell + cell / 2, cell, p.color, facing.get(p.id) ?? 1, p.invincible > 0, p.shield > 0, pulse);
+    drawPlayer(
+      p.y * cell + cell / 2,
+      p.x * cell + cell / 2,
+      cell,
+      p.color,
+      botOption(seats[playerIndex]),
+      facing.get(p.id) ?? 1,
+      p.invincible > 0,
+      p.shield > 0,
+      pulse,
+    );
   }
 
   roundBadge.textContent = state.over ? `结束 · ${state.round} 回合` : `回合 ${state.round}`;
 }
 
-// 炸弹人角色：头盔球体 + 护目镜带 + 眼睛 + 底部阴影 + 状态光环
+// 座位色标识玩家，Emoji 标识控制该玩家的机器人算法。
 function drawPlayer(
   cx: number,
   cy: number,
   cell: number,
   color: string,
+  role: (typeof botOptions)[number],
   face: number,
   inv: boolean,
   shield: boolean,
@@ -1186,31 +1220,18 @@ function drawPlayer(
   ctx.ellipse(cx - r * 0.28, cy - r * 0.5, r * 0.42, r * 0.22, -0.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // 护目镜深色带
-  ctx.fillStyle = 'rgba(9,14,25,0.9)';
+  // 深色内盘保证彩色 Emoji 在所有座位色上都清晰。
+  ctx.fillStyle = 'rgba(9,14,25,0.72)';
   ctx.beginPath();
-  ctx.ellipse(cx, cy - r * 0.05, r * 0.86, r * 0.34, 0, 0, Math.PI * 2);
+  ctx.arc(cx, cy, r * 0.72, 0, Math.PI * 2);
   ctx.fill();
 
-  // 双眼（朝向偏移）
-  const eo = r * 0.34;
-  const dx = face * r * 0.12;
-  for (const sx of [-eo, eo]) {
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(cx + sx + dx, cy - r * 0.05, r * 0.2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#0b0f17';
-    ctx.beginPath();
-    ctx.arc(cx + sx + dx + face * r * 0.05, cy - r * 0.05, r * 0.1, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // 护目镜高光
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-  ctx.lineWidth = Math.max(1, cell * 0.02);
-  ctx.beginPath();
-  ctx.ellipse(cx, cy - r * 0.05, r * 0.86, r * 0.34, 0, Math.PI * 1.05, Math.PI * 1.55);
-  ctx.stroke();
+  drawBotRoleMark(cx, cy, r, role.id);
+
+  ctx.font = `${Math.floor(r * 1.15)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(role.icon, cx + face * r * 0.025, cy + r * 0.04);
 
   // 外描边
   ctx.strokeStyle = 'rgba(255,255,255,0.85)';
@@ -1218,6 +1239,93 @@ function drawPlayer(
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawBotRoleMark(
+  cx: number,
+  cy: number,
+  r: number,
+  botId: string,
+): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.lineWidth = Math.max(1.5, r * 0.1);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (botId === 'manual') {
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.34, r * 0.08);
+    ctx.lineTo(0, -r * 0.3);
+    ctx.lineTo(r * 0.34, r * 0.08);
+    ctx.moveTo(0, -r * 0.27);
+    ctx.lineTo(0, r * 0.34);
+    ctx.stroke();
+  } else if (botId === 'easy') {
+    const reelWidth = r * 0.16;
+    for (const offset of [-0.24, 0, 0.24]) {
+      ctx.strokeRect(
+        r * offset - reelWidth / 2,
+        -r * 0.25,
+        reelWidth,
+        r * 0.5,
+      );
+    }
+  } else if (botId === 'hard') {
+    ctx.strokeRect(-r * 0.34, -r * 0.26, r * 0.68, r * 0.52);
+    ctx.beginPath();
+    ctx.arc(-r * 0.16, -r * 0.04, r * 0.055, 0, Math.PI * 2);
+    ctx.arc(r * 0.16, -r * 0.04, r * 0.055, 0, Math.PI * 2);
+    ctx.moveTo(-r * 0.16, r * 0.13);
+    ctx.lineTo(r * 0.16, r * 0.13);
+    ctx.stroke();
+  } else if (botId === 'search') {
+    ctx.beginPath();
+    ctx.arc(-r * 0.08, -r * 0.08, r * 0.22, 0, Math.PI * 2);
+    ctx.moveTo(r * 0.08, r * 0.08);
+    ctx.lineTo(r * 0.34, r * 0.34);
+    ctx.stroke();
+  } else if (botId === 'nn') {
+    const nodes: Array<[number, number]> = [
+      [-0.28, -0.2],
+      [-0.28, 0.2],
+      [0, 0],
+      [0.28, -0.2],
+      [0.28, 0.2],
+    ];
+    ctx.beginPath();
+    for (const [fromX, fromY, toX, toY] of [
+      [-0.28, -0.2, 0, 0],
+      [-0.28, 0.2, 0, 0],
+      [0, 0, 0.28, -0.2],
+      [0, 0, 0.28, 0.2],
+    ]) {
+      ctx.moveTo(r * fromX, r * fromY);
+      ctx.lineTo(r * toX, r * toY);
+    }
+    ctx.stroke();
+    for (const [x, y] of nodes) {
+      ctx.beginPath();
+      ctx.arc(r * x, r * y, r * 0.07, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    ctx.beginPath();
+    for (let point = 0; point < 8; point++) {
+      const radius = point % 2 === 0 ? r * 0.34 : r * 0.14;
+      const angle = -Math.PI / 2 + point * Math.PI / 4;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      if (point === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
 
   ctx.restore();
 }
@@ -1494,8 +1602,10 @@ function darken(hex: string): string {
 }
 
 function renderStats(): void {
+  const seats = seatBotIds();
   statsEl.innerHTML = state.players
-    .map((p) => {
+    .map((p, index) => {
+      const option = botOption(seats[index]);
       const hpSlots = Math.max(state.config.playerMaxHp, p.hp);
       const hpDots = Array.from({ length: hpSlots }, (_, i) => `<i class="${i < p.hp ? 'on' : ''}"></i>`).join('');
       const badges = [
@@ -1506,10 +1616,10 @@ function renderStats(): void {
       return `
         <div class="player-card ${p.alive ? '' : 'dead'}">
           <div class="head">
-            <span class="swatch" style="background:${p.color}"></span>
+            <span class="bot-avatar" style="--seat-color:${p.color}">${option.icon}</span>
             <span class="pname">${p.name}方</span>
             <span class="hp-dots">${hpDots}</span>
-            <span class="prole">${bots.get(p.id)?.label ?? ''}</span>
+            <span class="prole">${option.label}</span>
           </div>
           <div class="pstats">
             <div class="pstat"><div class="k">得分</div><div class="v">${p.score}</div></div>
