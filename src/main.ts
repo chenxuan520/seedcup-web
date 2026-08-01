@@ -213,6 +213,7 @@ app.innerHTML = `
         </div>
         <p>2023 年种子杯炸弹人对战题。网页规则、机器人和神经网络推理均与 C++ 实现对拍。</p>
         <div class="source-links">
+          <a href="https://github.com/hust-umi/seedcup2023-client/tree/main" target="_blank" rel="noreferrer">比赛题目与客户端</a>
           <a href="https://github.com/chenxuan520/seedcup2023" target="_blank" rel="noreferrer">官方服务端</a>
           <a href="https://gitee.com/chenxuan520/seedcup-cppsdk" target="_blank" rel="noreferrer">C++ Bot SDK</a>
           <a href="https://github.com/chenxuan520/deeplearning" target="_blank" rel="noreferrer">深度学习库</a>
@@ -333,6 +334,20 @@ app.innerHTML = `
     </div>
   </dialog>
 
+  <dialog class="help-dialog bot-info-dialog" id="botInfoDialog" aria-labelledby="botInfoTitle">
+    <div class="help-shell">
+      <header class="help-head bot-info-head">
+        <div>
+          <span class="help-kicker" id="botInfoKicker">Control mode</span>
+          <h2 id="botInfoTitle">控制方式说明</h2>
+          <p id="botInfoSummary"></p>
+        </div>
+        <button class="help-close" id="botInfoCloseBtn" type="button" aria-label="关闭控制方式说明" title="关闭">×</button>
+      </header>
+      <div class="help-body bot-info-body" id="botInfoBody"></div>
+    </div>
+  </dialog>
+
   <dialog class="help-dialog nn-dialog" id="nnDialog" aria-labelledby="nnTitle">
     <div class="help-shell">
       <header class="help-head nn-head">
@@ -371,6 +386,10 @@ app.innerHTML = `
             </div>
           </div>
           <div class="nn-repo-list">
+            <a href="https://github.com/hust-umi/seedcup2023-client/tree/main" target="_blank" rel="noreferrer">
+              <strong>seedcup2023-client</strong>
+              <span>2023 年种子杯比赛题目与客户端仓库，提供赛题背景、协议入口和参赛客户端材料。</span>
+            </a>
             <a href="https://github.com/chenxuan520/seedcup2023" target="_blank" rel="noreferrer">
               <strong>seedcup2023</strong>
               <span>原版 C++ 服务端，是地图、炸弹、碰撞、道具、计分和胜负规则的权威来源。</span>
@@ -634,6 +653,7 @@ app.innerHTML = `
             <span>3/4 人局可以运行，但全图敌方通道会合并多个敌人，部分全局敌方标量只选择一个对手，因此多人策略没有经过与 1v1 同等强度的训练和验证。</span>
           </div>
           <div class="source-links nn-source-links">
+            <a href="https://github.com/hust-umi/seedcup2023-client/tree/main" target="_blank" rel="noreferrer">比赛题目与客户端</a>
             <a href="https://github.com/chenxuan520/seedcup2023" target="_blank" rel="noreferrer">原版 C++ 服务端</a>
             <a href="https://gitee.com/chenxuan520/seedcup-cppsdk" target="_blank" rel="noreferrer">训练与 C++ 推理代码</a>
             <a href="https://github.com/chenxuan520/deeplearning" target="_blank" rel="noreferrer">C++ 深度学习库</a>
@@ -683,6 +703,12 @@ const winnerSub = document.querySelector<HTMLDivElement>('#winnerSub')!;
 const helpBtn = document.querySelector<HTMLButtonElement>('#helpBtn')!;
 const helpCloseBtn = document.querySelector<HTMLButtonElement>('#helpCloseBtn')!;
 const helpDialog = document.querySelector<HTMLDialogElement>('#helpDialog')!;
+const botInfoDialog = document.querySelector<HTMLDialogElement>('#botInfoDialog')!;
+const botInfoCloseBtn = document.querySelector<HTMLButtonElement>('#botInfoCloseBtn')!;
+const botInfoKicker = document.querySelector<HTMLSpanElement>('#botInfoKicker')!;
+const botInfoTitle = document.querySelector<HTMLHeadingElement>('#botInfoTitle')!;
+const botInfoSummary = document.querySelector<HTMLParagraphElement>('#botInfoSummary')!;
+const botInfoBody = document.querySelector<HTMLDivElement>('#botInfoBody')!;
 const nnCloseBtn = document.querySelector<HTMLButtonElement>('#nnCloseBtn')!;
 const nnDialog = document.querySelector<HTMLDialogElement>('#nnDialog')!;
 
@@ -717,8 +743,8 @@ const lastPos = new Map<number, string>();
 
 const botOptions = [
   { id: 'manual', label: '手动', note: '由你用键盘或屏幕方向键操控。' },
-  { id: 'easy', label: '简单', qualifier: '（easy，纯逻辑判断）', note: '官方 easy 规则：BFS 寻找最优格，速度固定为 1。' },
-  { id: 'hard', label: '困难', qualifier: '（hard，纯逻辑判断）', note: '比赛版 C++ hard：危险逃生、放弹安全判定和独立随机方向序。' },
+  { id: 'easy', label: '简单', note: '官方 easy 规则：BFS 寻找最优格，速度固定为 1。' },
+  { id: 'hard', label: '困难', note: '比赛版 C++ hard：危险逃生、放弹安全判定和独立随机方向序。' },
   { id: 'search', label: '搜索增强', note: '3 层 C++ rollout 搜索，叠加 RNN 小先验和地图派生随机种子。' },
   { id: 'nn', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
 ];
@@ -730,12 +756,104 @@ function botOption(id: string) {
 
 function botLabelHtml(id: string): string {
   const option = botOption(id);
-  if (!option) return '困难';
-  const qualifier = option.qualifier
-    ? `<span class="logic-qualifier">${option.qualifier}</span>`
-    : '';
-  return `${option.label}${qualifier}`;
+  return option?.label ?? '困难';
 }
+
+const botInfoContent: Record<
+  string,
+  { kicker: string; title: string; summary: string; body: string }
+> = {
+  manual: {
+    kicker: 'Human control',
+    title: '手动玩家',
+    summary: '动作完全由当前用户输入，不运行规则决策、神经网络或搜索。',
+    body: `
+      <div class="bot-info-facts">
+        <div><span>决策来源</span><strong>键盘与屏幕方向键</strong></div>
+        <div><span>每回合动作</span><strong>最多等于当前 speed</strong></div>
+        <div><span>神经网络</span><strong>不使用</strong></div>
+        <div><span>搜索</span><strong>不使用</strong></div>
+      </div>
+      <section class="bot-info-section">
+        <h3>怎么操作</h3>
+        <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 或方向键移动，<kbd>空格</kbd>放炸弹；移动端可使用棋盘下方的方向键。输入会进入该玩家的动作队列，每回合最多取当前 speed 个动作，队列为空时保持静止。</p>
+      </section>
+      <section class="bot-info-section">
+        <h3>运行方式</h3>
+        <p>手动玩家不创建 Bot Worker。重开、切换控制方式或导入对局时，未执行的手动动作会被清空，避免旧输入带入新局。</p>
+      </section>
+    `,
+  },
+  easy: {
+    kicker: 'C++ rule bot',
+    title: '简单机器人',
+    summary: '比赛版 C++ easy Bot 的 TypeScript 对齐实现，只做确定的规则与图搜索判断。',
+    body: `
+      <div class="bot-info-facts">
+        <div><span>决策来源</span><strong>纯逻辑规则</strong></div>
+        <div><span>每回合动作</span><strong>固定最多 1 个</strong></div>
+        <div><span>神经网络</span><strong>不使用</strong></div>
+        <div><span>搜索</span><strong>BFS 路径搜索</strong></div>
+      </div>
+      <section class="bot-info-section">
+        <h3>决策流程</h3>
+        <p>先根据炸弹十字范围和无敌敌人的可达范围标记危险区。自己处于危险格时，用 BFS 寻找最近安全格；安全时遍历可达地图，给道具、泥墙和可攻击敌人打分，再决定移动、静止或放弹。放弹前会检查在爆炸倒计时内是否存在逃生路径。</p>
+      </section>
+      <section class="bot-info-section">
+        <h3>与比赛代码的关系</h3>
+        <p>唯一权威是 C++ SDK 提交 <code>c7cdf9e</code> 的 easy 实现。方向同分时保留原版 <code>glibc rand()</code> 与 <code>random_shuffle</code> 消费顺序；即使吃到加速，每回合仍固定最多提交一个动作。</p>
+      </section>
+      <div class="bot-info-note">它不是“故意送死”的弱化算法。网页会保留原 C++ 在相同状态下的动作，即使某些局面看起来不够安全。</div>
+    `,
+  },
+  hard: {
+    kicker: 'C++ rule bot',
+    title: '困难机器人',
+    summary: '比赛提交中的 hard 规则 Bot，使用危险逃生、地图评分和放弹安全判断。',
+    body: `
+      <div class="bot-info-facts">
+        <div><span>决策来源</span><strong>纯逻辑规则</strong></div>
+        <div><span>每回合动作</span><strong>最多等于当前 speed</strong></div>
+        <div><span>神经网络</span><strong>不使用</strong></div>
+        <div><span>搜索</span><strong>BFS + 规则评分</strong></div>
+      </div>
+      <section class="bot-info-section">
+        <h3>比简单版多了什么</h3>
+        <p>同样先标记炸弹和无敌碰撞危险，再用 BFS 逃生；安全时会更重视敌人、关键道具和泥墙收益，并使用 hard 分支的放弹安全判断。吃到加速后，一个回合可按 speed 连续提交多个动作。</p>
+      </section>
+      <section class="bot-info-section">
+        <h3>并发与随机顺序</h3>
+        <p>每名困难 Bot 在独立 Web Worker 中保留自己的方向随机状态，主线程按 Worker 实际返回顺序执行整批动作，对应多个 C++ 客户端并发回包的服务端语义。</p>
+      </section>
+      <div class="bot-info-note">困难 Bot 仍是规则程序，没有神经网络参数，也不会向未来复制游戏状态做 rollout。</div>
+    `,
+  },
+  search: {
+    kicker: 'Rule search + NN prior',
+    title: '搜索增强机器人',
+    summary: '以困难 Bot 为基线，用浅层 C++ GameSim rollout 比较候选动作；NN 只提供极小先验。',
+    body: `
+      <div class="bot-info-facts">
+        <div><span>基线动作</span><strong>困难规则 Bot</strong></div>
+        <div><span>候选动作</span><strong>静止 + 四方向 + 放弹</strong></div>
+        <div><span>搜索深度</span><strong>3 层 / 每动作 1 rollout</strong></div>
+        <div><span>NN 先验权重</span><strong>0.005</strong></div>
+      </div>
+      <section class="bot-info-section">
+        <h3>它搜索什么</h3>
+        <p>在当前完整状态上先计算 hard 的基线动作，再分别强制尝试 6 个候选动作。每个候选复制一份 C++ 对齐的 GameSim，首步执行候选动作，后续双方都继续用规则 Bot 走到深度 3，最后按存活、分数和局面结果得到 rollout 分数。</p>
+      </section>
+      <section class="bot-info-section">
+        <h3>什么时候覆盖 hard</h3>
+        <p>候选动作的原始搜索分数必须比 hard 基线至少高 <code>0.05</code> 才会替换；当前玩家处于危险区时不搜索，直接保留 hard 的逃生动作。纯 NN 模型概率只以 <code>0.005</code> 的小权重参与同分附近的排序，模型未加载时仍可用纯规则搜索运行。</p>
+      </section>
+      <section class="bot-info-section">
+        <h3>能力边界</h3>
+        <p>它不是训练出的另一个模型，也不是纯 NN。浅层搜索能看到候选动作的短期后果，但深度和 rollout 数受浏览器实时性限制；当前资料不能据此宣称它稳定强于比赛版 hard。</p>
+      </section>
+    `,
+  },
+};
 
 class BotWorkerClient {
   private readonly worker: Worker;
@@ -901,7 +1019,7 @@ function renderBotSelectors(): void {
           <select class="seat-select" data-seat="${i}" aria-label="${seatNames[i]}方玩家机器人">${opts}</select>
           <div class="seat-selection-overlay">
             <span class="seat-selection-label" aria-hidden="true">${currentLabel}</span>
-            <button class="nn-info-trigger${cur === 'nn' ? '' : ' is-hidden'}" type="button" data-nn-info="${i}" aria-label="查看${seatNames[i]}方纯神经网络训练说明" aria-haspopup="dialog" aria-controls="nnDialog" title="查看纯神经网络训练说明"><span aria-hidden="true">?</span></button>
+            <button class="bot-info-trigger" type="button" data-bot-info="${i}" aria-label="查看${seatNames[i]}方${botLabelHtml(cur)}说明" aria-haspopup="dialog" aria-controls="${cur === 'nn' ? 'nnDialog' : 'botInfoDialog'}" title="查看${botLabelHtml(cur)}说明"><span aria-hidden="true">?</span></button>
           </div>
         </div>
       </div>`;
@@ -909,23 +1027,32 @@ function renderBotSelectors(): void {
   botSelectors.innerHTML = html;
   botSelectors.querySelectorAll<HTMLSelectElement>('.seat-select').forEach((s) => {
     s.addEventListener('change', () => {
-      syncNnInfoTrigger(s);
+      syncBotInfoTrigger(s);
       resetGame();
     });
   });
-  botSelectors.querySelectorAll<HTMLButtonElement>('.nn-info-trigger').forEach((button) => {
-    button.addEventListener('click', openNnInfo);
+  botSelectors.querySelectorAll<HTMLButtonElement>('.bot-info-trigger').forEach((button) => {
+    button.addEventListener('click', openBotInfo);
   });
 }
 
-function syncNnInfoTrigger(select: HTMLSelectElement): void {
+function syncBotInfoTrigger(select: HTMLSelectElement): void {
   const wrap = select.closest('.seat-select-wrap');
-  const trigger = wrap?.querySelector<HTMLButtonElement>('.nn-info-trigger');
+  const trigger = wrap?.querySelector<HTMLButtonElement>('.bot-info-trigger');
   const label = wrap?.querySelector<HTMLSpanElement>('.seat-selection-label');
   if (label) {
     label.innerHTML = botLabelHtml(select.value);
   }
-  trigger?.classList.toggle('is-hidden', select.value !== 'nn');
+  if (trigger) {
+    const seat = Number(select.dataset.seat ?? 0);
+    const botLabel = botLabelHtml(select.value);
+    trigger.setAttribute('aria-label', `查看${seatNames[seat]}方${botLabel}说明`);
+    trigger.setAttribute(
+      'aria-controls',
+      select.value === 'nn' ? 'nnDialog' : 'botInfoDialog',
+    );
+    trigger.title = `查看${botLabel}说明`;
+  }
 }
 
 function seatBotIds(): string[] {
@@ -1110,7 +1237,7 @@ function importMatch(payload: ExportedMatch): void {
     const restoredBot =
       payload.controls.bots[index] ?? defaultSeatBots[index] ?? 'hard';
     select.value = restoredBot === 'hybrid' ? 'search' : restoredBot;
-    syncNnInfoTrigger(select);
+    syncBotInfoTrigger(select);
   });
   const restored: GameState = {
     config: { ...payload.state.config },
@@ -1335,7 +1462,7 @@ function openDialog(dialog: HTMLDialogElement): void {
 
 function closeDialog(dialog: HTMLDialogElement): void {
   dialog.close();
-  if (!helpDialog.open && !nnDialog.open) {
+  if (!helpDialog.open && !botInfoDialog.open && !nnDialog.open) {
     document.body.classList.remove('dialog-open');
   }
 }
@@ -1344,22 +1471,41 @@ function openHelp(): void {
   openDialog(helpDialog);
 }
 
-function openNnInfo(): void {
-  openDialog(nnDialog);
+function openBotInfo(event: Event): void {
+  const button = event.currentTarget as HTMLButtonElement;
+  const seat = Number(button.dataset.botInfo ?? 0);
+  const select = botSelectors.querySelector<HTMLSelectElement>(
+    `.seat-select[data-seat="${seat}"]`,
+  );
+  const botId = select?.value ?? 'hard';
+  if (botId === 'nn') {
+    openDialog(nnDialog);
+    return;
+  }
+  const content = botInfoContent[botId] ?? botInfoContent.hard;
+  botInfoKicker.textContent = content.kicker;
+  botInfoTitle.textContent = content.title;
+  botInfoSummary.textContent = content.summary;
+  botInfoBody.innerHTML = content.body;
+  openDialog(botInfoDialog);
 }
 
 helpBtn.addEventListener('click', openHelp);
 helpCloseBtn.addEventListener('click', () => closeDialog(helpDialog));
+botInfoCloseBtn.addEventListener('click', () => closeDialog(botInfoDialog));
 nnCloseBtn.addEventListener('click', () => closeDialog(nnDialog));
 helpDialog.addEventListener('click', (event) => {
   if (event.target === helpDialog) closeDialog(helpDialog);
 });
+botInfoDialog.addEventListener('click', (event) => {
+  if (event.target === botInfoDialog) closeDialog(botInfoDialog);
+});
 nnDialog.addEventListener('click', (event) => {
   if (event.target === nnDialog) closeDialog(nnDialog);
 });
-for (const dialog of [helpDialog, nnDialog]) {
+for (const dialog of [helpDialog, botInfoDialog, nnDialog]) {
   dialog.addEventListener('close', () => {
-    if (!helpDialog.open && !nnDialog.open) {
+    if (!helpDialog.open && !botInfoDialog.open && !nnDialog.open) {
       document.body.classList.remove('dialog-open');
     }
   });

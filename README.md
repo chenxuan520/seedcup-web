@@ -7,6 +7,7 @@
 相关项目：
 
 - [本项目源码](https://github.com/chenxuan520/seedcup-web)
+- [2023 种子杯比赛题目与客户端](https://github.com/hust-umi/seedcup2023-client/tree/main)
 - [官方服务端](https://github.com/chenxuan520/seedcup2023)
 - [C++ Bot SDK](https://gitee.com/chenxuan520/seedcup-cppsdk)
 - [C++ 深度学习库](https://github.com/chenxuan520/deeplearning)

@@ -127,7 +127,7 @@ async function main() {
   if (await page.$eval('#helpDialog', (dialog) => (dialog as HTMLDialogElement).open)) {
     throw new Error('help dialog did not close');
   }
-  const nnInfo = await page.$$eval('.nn-info-trigger', (buttons) =>
+  const botInfo = await page.$$eval('.bot-info-trigger', (buttons) =>
     buttons.map((button) => {
       const trigger = button.getBoundingClientRect();
       const icon = button.querySelector('span')?.getBoundingClientRect();
@@ -137,8 +137,8 @@ async function main() {
         ?.querySelector('.seat-selection-label')
         ?.getBoundingClientRect();
       return {
-        hidden: button.classList.contains('is-hidden'),
         label: button.getAttribute('aria-label') ?? '',
+        controls: button.getAttribute('aria-controls') ?? '',
         textGap: label && icon ? icon.left - label.right : -1,
         trailingSpace: wrap ? wrap.right - trigger.right : -1,
         width: trigger.width,
@@ -147,19 +147,49 @@ async function main() {
     }),
   );
   if (
-    nnInfo.length !== 2 ||
-    !nnInfo[0].hidden ||
-    nnInfo[1].hidden ||
-    !nnInfo[1].label.includes('纯神经网络') ||
-    nnInfo[1].textGap < 3 ||
-    nnInfo[1].textGap > 7 ||
-    nnInfo[1].trailingSpace <= 30 ||
-    nnInfo[1].width < 32 ||
-    nnInfo[1].height < 32
+    botInfo.length !== 2 ||
+    !botInfo[0].label.includes('简单') ||
+    botInfo[0].controls !== 'botInfoDialog' ||
+    !botInfo[1].label.includes('纯神经网络') ||
+    botInfo[1].controls !== 'nnDialog' ||
+    botInfo.some(
+      (info) =>
+        info.textGap < 3 ||
+        info.textGap > 7 ||
+        info.trailingSpace <= 30 ||
+        info.width < 32 ||
+        info.height < 32,
+    )
   ) {
-    throw new Error(`nn info trigger mismatch: ${JSON.stringify(nnInfo)}`);
+    throw new Error(`bot info trigger mismatch: ${JSON.stringify(botInfo)}`);
   }
-  await page.focus('.nn-info-trigger[data-nn-info="1"]');
+  await page.click('.bot-info-trigger[data-bot-info="0"]');
+  const mobileEasyInfo = await page.$eval('#botInfoDialog', (dialog) => {
+    const element = dialog as HTMLDialogElement;
+    const rect = element.getBoundingClientRect();
+    return {
+      open: element.open,
+      text: element.textContent ?? '',
+      left: rect.left,
+      right: rect.right,
+      viewport: window.innerWidth,
+    };
+  });
+  if (
+    !mobileEasyInfo.open ||
+    !mobileEasyInfo.text.includes('简单机器人') ||
+    !mobileEasyInfo.text.includes('固定最多 1 个') ||
+    !mobileEasyInfo.text.includes('BFS 路径搜索') ||
+    mobileEasyInfo.left < 0 ||
+    mobileEasyInfo.right > mobileEasyInfo.viewport
+  ) {
+    throw new Error(
+      `easy bot info mismatch: ${JSON.stringify(mobileEasyInfo)}`,
+    );
+  }
+  await page.click('#botInfoCloseBtn');
+
+  await page.focus('.bot-info-trigger[data-bot-info="1"]');
   await page.keyboard.press('Enter');
   const mobileNn = await page.$eval('#nnDialog', (dialog) => {
     const element = dialog as HTMLDialogElement;
@@ -213,7 +243,7 @@ async function main() {
   if (await page.$eval('#nnDialog', (dialog) => (dialog as HTMLDialogElement).open)) {
     throw new Error('nn dialog did not close');
   }
-  await page.focus('.nn-info-trigger[data-nn-info="1"]');
+  await page.focus('.bot-info-trigger[data-bot-info="1"]');
   await page.keyboard.press('Space');
   if (!await page.$eval('#nnDialog', (dialog) => (dialog as HTMLDialogElement).open)) {
     throw new Error('nn dialog did not open with Space');
@@ -224,13 +254,15 @@ async function main() {
   await page.selectOption('.seat-select[data-seat="0"]', 'nn');
   const changedNnState = await page.$$eval('.seat-select-wrap', (wraps) =>
     wraps.map((wrap) => ({
-      hidden: wrap.querySelector('.nn-info-trigger')?.classList.contains('is-hidden'),
+      controls:
+        wrap.querySelector('.bot-info-trigger')?.getAttribute('aria-controls') ??
+        '',
       text: wrap.querySelector('.seat-selection-label')?.textContent ?? '',
     })),
   );
   if (
     changedNnState.length !== 2 ||
-    changedNnState.some((seat) => seat.hidden) ||
+    changedNnState.some((seat) => seat.controls !== 'nnDialog') ||
     changedNnState.some((seat) => seat.text !== '纯神经网络')
   ) {
     throw new Error(
@@ -240,15 +272,17 @@ async function main() {
   await page.selectOption('.seat-select[data-seat="0"]', 'easy');
   const restoredNnState = await page.$$eval('.seat-select-wrap', (wraps) =>
     wraps.map((wrap) => ({
-      hidden: wrap.querySelector('.nn-info-trigger')?.classList.contains('is-hidden'),
+      controls:
+        wrap.querySelector('.bot-info-trigger')?.getAttribute('aria-controls') ??
+        '',
       text: wrap.querySelector('.seat-selection-label')?.textContent ?? '',
     })),
   );
   if (
     restoredNnState.length !== 2 ||
-    !restoredNnState[0].hidden ||
-    restoredNnState[1].hidden ||
-    restoredNnState[0].text !== '简单（easy，纯逻辑判断）' ||
+    restoredNnState[0].controls !== 'botInfoDialog' ||
+    restoredNnState[1].controls !== 'nnDialog' ||
+    restoredNnState[0].text !== '简单' ||
     restoredNnState[1].text !== '纯神经网络'
   ) {
     throw new Error(
@@ -416,20 +450,9 @@ async function main() {
         };
       }),
     );
-    const labelsMatchBot = (selected: string, visible: string) => {
-      if (selected === '简单') {
-        return visible === '简单（easy，纯逻辑判断）';
-      }
-      if (selected === '困难') {
-        return visible === '困难（hard，纯逻辑判断）';
-      }
-      return selected === visible;
-    };
     if (
       afterImportSelections.length !== 4 ||
-      afterImportSelections.some(
-        (seat) => !labelsMatchBot(seat.selected, seat.visible),
-      )
+      afterImportSelections.some((seat) => seat.selected !== seat.visible)
     ) {
       problems.push(
         `import bot labels out of sync: ${JSON.stringify(afterImportSelections)}`,

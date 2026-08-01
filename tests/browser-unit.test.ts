@@ -23,24 +23,24 @@ describe('browser application controls', () => {
     ];
     expect(seats.map((seat) => seat.value)).toEqual(['easy', 'nn']);
     expect(document.querySelectorAll('.player-card')).toHaveLength(2);
-    expect(document.querySelector('#stats')?.textContent).toContain(
-      '简单（easy，纯逻辑判断）',
-    );
+    expect(document.querySelector('#stats')?.textContent).toContain('简单');
     expect(document.querySelector('#modelStatus')?.classList).toContain(
       'ready',
     );
-    const nnTriggers = [
-      ...document.querySelectorAll<HTMLButtonElement>('.nn-info-trigger'),
+    const botInfoTriggers = [
+      ...document.querySelectorAll<HTMLButtonElement>('.bot-info-trigger'),
     ];
-    expect(nnTriggers).toHaveLength(2);
-    expect(nnTriggers[0].classList).toContain('is-hidden');
-    expect(nnTriggers[1].classList).not.toContain('is-hidden');
-    const nnWrap = nnTriggers[1].closest('.seat-select-wrap')!;
+    expect(botInfoTriggers).toHaveLength(2);
+    expect(botInfoTriggers[0].getAttribute('aria-label')).toContain('简单');
+    expect(botInfoTriggers[1].getAttribute('aria-label')).toContain(
+      '纯神经网络',
+    );
+    const nnWrap = botInfoTriggers[1].closest('.seat-select-wrap')!;
     const nnLabel = nnWrap.querySelector<HTMLElement>('.seat-selection-label')!;
-    const nnIcon = nnTriggers[1].querySelector<HTMLElement>('span')!;
+    const nnIcon = botInfoTriggers[1].querySelector<HTMLElement>('span')!;
     const wrapRect = nnWrap.getBoundingClientRect();
     const labelRect = nnLabel.getBoundingClientRect();
-    const triggerRect = nnTriggers[1].getBoundingClientRect();
+    const triggerRect = botInfoTriggers[1].getBoundingClientRect();
     const iconRect = nnIcon.getBoundingClientRect();
     expect(iconRect.left - labelRect.right).toBeGreaterThanOrEqual(3);
     expect(iconRect.left - labelRect.right).toBeLessThanOrEqual(7);
@@ -57,7 +57,18 @@ describe('browser application controls', () => {
       (document.querySelector('#helpDialog') as HTMLDialogElement).open,
     ).toBe(false);
 
-    nnTriggers[1].click();
+    botInfoTriggers[0].click();
+    const botInfoDialog =
+      document.querySelector<HTMLDialogElement>('#botInfoDialog')!;
+    expect(botInfoDialog.open).toBe(true);
+    expect(botInfoDialog.textContent).toContain('简单机器人');
+    expect(botInfoDialog.textContent).toContain('固定最多 1 个');
+    expect(botInfoDialog.textContent).toContain('BFS 路径搜索');
+    expect(botInfoDialog.textContent).toContain('c7cdf9e');
+    click('#botInfoCloseBtn');
+    expect(botInfoDialog.open).toBe(false);
+
+    botInfoTriggers[1].click();
     const nnDialog = document.querySelector<HTMLDialogElement>('#nnDialog')!;
     expect(nnDialog.open).toBe(true);
     expect(nnDialog.textContent).toContain('1,156,486');
@@ -113,13 +124,13 @@ describe('browser application controls', () => {
     click('#nnCloseBtn');
     expect(nnDialog.open).toBe(false);
     expect(document.body.classList).not.toContain('dialog-open');
-    nnTriggers[1].focus();
+    botInfoTriggers[1].focus();
     const spaceEvent = new KeyboardEvent('keydown', {
       key: ' ',
       bubbles: true,
       cancelable: true,
     });
-    nnTriggers[1].dispatchEvent(spaceEvent);
+    botInfoTriggers[1].dispatchEvent(spaceEvent);
     expect(spaceEvent.defaultPrevented).toBe(false);
   });
 
@@ -163,20 +174,37 @@ describe('browser application controls', () => {
       ),
     ).toEqual(['manual', 'hard', 'search', 'nn']);
     expect(
-      [...document.querySelectorAll('.nn-info-trigger')].map((button) =>
-        button.classList.contains('is-hidden'),
+      [...document.querySelectorAll('.bot-info-trigger')].map((button) =>
+        button.getAttribute('aria-label'),
       ),
-    ).toEqual([true, true, true, false]);
+    ).toEqual([
+      '查看蓝方手动说明',
+      '查看红方困难说明',
+      '查看绿方搜索增强说明',
+      '查看黄方纯神经网络说明',
+    ]);
     expect(
       [...document.querySelectorAll('.seat-selection-label')].map(
         (label) => label.textContent,
       ),
-    ).toEqual([
-      '手动',
-      '困难（hard，纯逻辑判断）',
-      '搜索增强',
-      '纯神经网络',
-    ]);
+    ).toEqual(['手动', '困难', '搜索增强', '纯神经网络']);
+
+    const descriptions = [
+      ['0', '手动玩家', '键盘与屏幕方向键'],
+      ['1', '困难机器人', '最多等于当前 speed'],
+      ['2', '搜索增强机器人', '3 层 / 每动作 1 rollout'],
+    ];
+    for (const [seat, title, detail] of descriptions) {
+      document
+        .querySelector<HTMLButtonElement>(`.bot-info-trigger[data-bot-info="${seat}"]`)!
+        .click();
+      const dialog =
+        document.querySelector<HTMLDialogElement>('#botInfoDialog')!;
+      expect(dialog.open).toBe(true);
+      expect(dialog.textContent).toContain(title);
+      expect(dialog.textContent).toContain(detail);
+      click('#botInfoCloseBtn');
+    }
 
     const seed = document.querySelector<HTMLInputElement>('#seedInput')!;
     seed.value = '12345';
@@ -369,19 +397,15 @@ describe('browser application controls', () => {
     expect(seats[1].value).toBe('nn');
     expect(seats[2].value).toBe('easy');
     expect(
-      [...document.querySelectorAll('.nn-info-trigger')].map((button) =>
-        button.classList.contains('is-hidden'),
+      [...document.querySelectorAll('.bot-info-trigger')].map((button) =>
+        button.getAttribute('aria-controls'),
       ),
-    ).toEqual([true, false, true]);
+    ).toEqual(['botInfoDialog', 'nnDialog', 'botInfoDialog']);
     expect(
       [...document.querySelectorAll('.seat-selection-label')].map(
         (label) => label.textContent,
       ),
-    ).toEqual([
-      '搜索增强',
-      '纯神经网络',
-      '简单（easy，纯逻辑判断）',
-    ]);
+    ).toEqual(['搜索增强', '纯神经网络', '简单']);
     expect(document.querySelector('#winnerBig')?.textContent).toBe('平局');
     expect(document.querySelector('#winnerOverlay')?.classList).toContain(
       'show',
@@ -407,7 +431,7 @@ describe('browser application controls', () => {
     expect(dialog.open).toBe(false);
 
     const nnTrigger = document.querySelector<HTMLButtonElement>(
-      '.nn-info-trigger:not(.is-hidden)',
+      '.bot-info-trigger[data-bot-info="1"]',
     )!;
     nnTrigger.click();
     const nnDialog = document.querySelector<HTMLDialogElement>('#nnDialog')!;

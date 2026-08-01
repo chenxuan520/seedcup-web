@@ -220,6 +220,85 @@ body.dialog-open {
   width: min(880px, calc(100vw - 32px));
 }
 
+.bot-info-dialog {
+  width: min(720px, calc(100vw - 32px));
+}
+
+.bot-info-head {
+  border-top: 3px solid var(--cyan);
+}
+
+.bot-info-body {
+  padding-bottom: 28px;
+}
+
+.bot-info-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.bot-info-facts > div {
+  min-width: 0;
+  padding: 13px;
+  background: #101827;
+  border-right: 1px solid var(--line);
+}
+
+.bot-info-facts > div:last-child {
+  border-right: 0;
+}
+
+.bot-info-facts span,
+.bot-info-facts strong {
+  display: block;
+}
+
+.bot-info-facts span {
+  margin-bottom: 5px;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.bot-info-facts strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bot-info-section {
+  padding: 17px 0 0;
+}
+
+.bot-info-section h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.bot-info-section p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.bot-info-section code {
+  color: #bfdbfe;
+  font-size: 11px;
+}
+
+.bot-info-note {
+  margin-top: 16px;
+  padding: 11px 13px;
+  color: var(--muted);
+  background: rgba(245, 158, 11, 0.06);
+  border-left: 3px solid #f59e0b;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
 .nn-head {
   border-top: 3px solid var(--red);
 }
@@ -1423,10 +1502,20 @@ body.dialog-open {
   .help-status-grid,
   .help-map-grid,
   .help-item-grid,
+  .bot-info-facts,
   .nn-stat-grid,
   .nn-training-grid,
   .nn-contract {
     grid-template-columns: 1fr;
+  }
+
+  .bot-info-facts > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .bot-info-facts > div:last-child {
+    border-bottom: 0;
   }
 
   .help-flow .help-vs {
@@ -1853,10 +1942,6 @@ canvas {
 }
 
 @media (max-width: 640px) {
-  .logic-qualifier {
-    display: none;
-  }
-
   .manual-panel {
     grid-template-columns: 1fr;
   }
@@ -1958,11 +2043,7 @@ canvas {
   white-space: nowrap;
 }
 
-.logic-qualifier {
-  color: var(--muted);
-}
-
-.nn-info-trigger {
+.bot-info-trigger {
   width: 32px;
   height: 32px;
   flex: 0 0 32px;
@@ -1981,7 +2062,7 @@ canvas {
   pointer-events: auto;
 }
 
-.nn-info-trigger > span {
+.bot-info-trigger > span {
   width: 20px;
   height: 20px;
   display: grid;
@@ -1992,20 +2073,15 @@ canvas {
   border-radius: 50%;
 }
 
-.nn-info-trigger:hover > span,
-.nn-info-trigger:focus-visible > span {
+.bot-info-trigger:hover > span,
+.bot-info-trigger:focus-visible > span {
   color: #fff;
   background: var(--blue);
   border-color: #93c5fd;
 }
 
-.nn-info-trigger:focus-visible {
+.bot-info-trigger:focus-visible {
   outline: none;
-}
-
-.nn-info-trigger.is-hidden {
-  display: none;
-  pointer-events: none;
 }
 
 .select-wrap::after {
