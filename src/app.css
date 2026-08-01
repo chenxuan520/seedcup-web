@@ -395,25 +395,6 @@ body.dialog-open {
   font-size: 11px;
 }
 
-.help-bot-legend {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-  margin-top: 14px;
-}
-
-.help-bot-legend span {
-  min-width: 0;
-  padding: 8px 9px;
-  color: var(--muted);
-  background: var(--panel-2);
-  border: 1px solid var(--line-soft);
-  border-radius: 7px;
-  overflow-wrap: anywhere;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
 .help-rules,
 .help-status-grid {
   display: grid;
@@ -489,9 +470,6 @@ body.dialog-open {
 .map-swatch.player {
   border-radius: 50%;
   box-shadow: inset 8px 8px 12px rgba(255, 255, 255, 0.2), inset -8px -8px 12px rgba(0, 0, 0, 0.22);
-  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-  font-size: 17px;
-  line-height: 1;
 }
 
 .map-swatch.player.blue {
@@ -720,31 +698,6 @@ body.dialog-open {
     gap: 2px;
   }
 
-  .help-bot-legend {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .stage-head {
-    align-items: flex-start;
-  }
-
-  .versus {
-    gap: 7px 9px;
-    font-size: 13px;
-  }
-
-  .versus .bot-avatar {
-    width: 26px;
-    height: 26px;
-    flex-basis: 26px;
-    font-size: 15px;
-  }
-
-  .round-badge {
-    flex: 0 0 auto;
-    padding-inline: 9px;
-  }
-
   .player-panel #stats {
     grid-template-columns: 1fr;
   }
@@ -861,16 +814,13 @@ body.dialog-open {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
   margin-bottom: 14px;
 }
 
 .versus {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 12px;
-  min-width: 0;
   font-size: 16px;
   font-weight: 600;
 }
@@ -879,26 +829,12 @@ body.dialog-open {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
 }
 
-.bot-avatar {
-  --seat-color: var(--blue);
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  display: inline-grid;
-  place-items: center;
-  overflow: hidden;
-  background: #111827;
-  border: 3px solid var(--seat-color);
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--seat-color) 22%, transparent),
-    inset 0 -4px 8px rgba(0, 0, 0, 0.24);
-  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-  font-size: 17px;
-  line-height: 1;
+.versus .chip {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
 }
 
 .versus .vs {
@@ -1272,11 +1208,10 @@ input[type='number']:focus {
   min-width: 0;
 }
 
-.player-card .bot-avatar {
-  width: 34px;
-  height: 34px;
-  flex-basis: 34px;
-  font-size: 19px;
+.player-card .swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
 }
 
 .player-card .pname {
