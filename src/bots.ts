@@ -105,7 +105,9 @@ export class RuleBot implements BotController {
     moveShuffleRng?: CppMt19937,
     private readonly contestRules = false,
   ) {
-    this.label = hard ? '困难 (hard)' : '简单 (easy)';
+    this.label = hard
+      ? '困难（hard，纯逻辑判断）'
+      : '简单（easy，纯逻辑判断）';
     this.ownsMoveShuffleRng = moveShuffleRng == null;
     this.moveShuffleRng = moveShuffleRng ?? new CppMt19937();
   }

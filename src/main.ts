@@ -413,7 +413,7 @@ app.innerHTML = `
             <div role="row"><span role="cell">动作输出 bias</span><code role="cell">6</code><strong role="cell">6</strong><small role="cell">&lt;0.01%</small></div>
             <div class="nn-layer-total" role="row"><span role="cell">合计</span><code role="cell">—</code><strong role="cell">1,156,486</strong><small role="cell">100%</small></div>
           </div>
-          <p class="nn-copy">参数主体在输入矩阵（约 82.7 万）和循环矩阵（约 26.2 万）；128 维 head 约 6.6 万。模型文件比“参数量 × 4/8 字节”更大，是因为当前 <code>.rnn</code> 使用十进制纯文本保存浮点权重，便于 C++ 与浏览器直接解析和对拍。</p>
+          <p class="nn-copy">参数主体在输入矩阵（约 82.7 万）和循环矩阵（约 26.2 万）；128 维 head 约 6.6 万。若用 float32 连续存放，裸权重约为 4.41 MiB；当前 <code>.rnn</code> 为 6.25 MiB，因为它使用十进制纯文本保存浮点权重，便于 C++ 与浏览器直接解析和对拍。</p>
         </section>
 
         <section class="help-section">
@@ -447,7 +447,7 @@ app.innerHTML = `
           <div class="nn-feature-table" role="table" aria-label="地图输入通道">
             <div role="row"><b role="cell">可行走</b><span role="cell">无方块且无炸弹记 1，否则 0。</span></div>
             <div role="row"><b role="cell">可破坏泥墙</b><span role="cell">泥墙记 1；固定墙和空地记 0。墙没有逐点血量。</span></div>
-            <div role="row"><b role="cell">炸弹</b><span role="cell">该格有炸弹记 1；炸弹没有血量，只记录位置、范围、所有者和倒计时。</span></div>
+            <div role="row"><b role="cell">炸弹</b><span role="cell">该格有炸弹记 1；炸弹没有血量。其他通道会反映倒计时及其范围形成的危险，但炸弹所有者不会进入模型输入。</span></div>
             <div role="row"><b role="cell">爆炸危险</b><span role="cell">位于任意炸弹十字爆炸范围内记 1，方块会阻断传播。</span></div>
             <div role="row"><b role="cell">任意道具</b><span role="cell">只区分“有/无道具”，拾取前不把火力、回血等类型单独编码。</span></div>
             <div role="row"><b role="cell">任意敌人</b><span role="cell">该格存在其他存活玩家记 1；多人局会合并到同一个敌方通道。</span></div>
@@ -504,9 +504,13 @@ app.innerHTML = `
             <strong>为什么不只模仿 hard 的动作？</strong>
             <p>如果只保存“这个状态下 hard 走了什么”，网络一旦自己走错一步，就会进入老师轨迹没有覆盖的新状态；而且 hard 的强度有一部分来自连续逃生与未来炸弹时序，压成单步动作标签会丢失信息。最终路线因此改为：让当前 NN 自己打，专门寻找它实际输掉的原因。</p>
           </div>
+          <div class="nn-data-origin">
+            <strong>训练数据从哪里来</strong>
+            <p>没有下载公开数据集，也没有人工操作录像。数据由 <code>seedcup-cppsdk</code> 的 C++ <code>GameSim</code> 在 13 × 13 地图上现场生成：当前纯 NN checkpoint 对战训练分支 hard Bot，模拟器每个动作子步导出与协议一致的 <code>GameMsg</code>，再由 <code>FeatureExtractorV2</code> 变成 1616 维输入。地图、炸弹、玩家属性、历史和动作上下文都来自这条 C++ 链路；easy 只用于训练后的能力验证，不进入最终两次父模型精修数据。</p>
+          </div>
           <ol class="nn-route">
-            <li><strong>规则预训练</strong><span>早期用规则 Bot 自对弈和赢家轨迹建立基础 policy，让网络先学会移动、取道具、放弹和危险逃生的基本分布。</span></li>
-            <li><strong>当前模型自己对战</strong><span>冻结一个候选模型，让它在 C++ GameSim 中与训练分支的 hard/easy 规则 Bot 完整打完 64 局。保存每一步 GameMsg、1426 维特征、历史摘要、当时 hidden 所需上下文、实际动作、是否危险，以及最终胜负和分数。</span></li>
+            <li><strong>加载初始化底座</strong><span>最终 run 不是从随机权重开始，而是加载 <code>rnns512_actionctx_safeexpand_snapshot</code>。它继承早期规则赢家轨迹、RNN policy 和 on-policy 实验筛出的稳定 body；safe-expand 只复制旧权重并把新增输入/容量置零保护，生成这份 snapshot 时是 0 个新对局、0 次梯度更新。早期探索反复复用 checkpoint，日志无法还原一个无重复的“累计总样本数”，因此不把所有失败实验局数冒充最终模型数据。</span></li>
+            <li><strong>当前模型自己对战</strong><span>冻结一个候选模型，让它在 C++ GameSim 中与训练分支的 hard 规则 Bot 完整打完 64 局；easy 用于后续能力验证，不属于这组 20 胜、44 负的采集数据。保存每一步 GameMsg、1426 维特征、历史摘要、当时 hidden 所需上下文、实际动作、是否危险，以及最终胜负和分数。</span></li>
             <li><strong>筛出真正的失败局</strong><span>本次代表性 run 中模型赢 20 局、输 44 局。赢局说明当前策略至少能完成目标，不用于尾部纠错；主要处理 44 条输局，避免把已经成功的动作序列改坏。</span></li>
             <li><strong>只查看最后 30 个决策</strong><span>越靠近终局，某一步是否导致死亡或翻盘越容易判断；太早的动作要经过很长未来，因果噪声更大且计算昂贵。前面的 step 仍按原动作顺序重放，用来恢复该时刻真实的 RNN hidden state。</span></li>
             <li><strong>复制完整分支点</strong><span>到达一个候选 step 时，同时复制地图、玩家、炸弹、随机状态、当前 DLBot 和 RNN hidden。这样 6 个候选动作从完全相同的历史出发，不会把不同 hidden 混成标签。</span></li>
@@ -514,7 +518,7 @@ app.innerHTML = `
             <li><strong>用终局生成 soft target</strong><span>原轨迹会输、某个替代动作分支最终会赢，才说明该动作有翻盘证据。一个动作能赢时目标集中给它；多个动作都能赢时在这些动作之间分配概率；六个动作都不能赢时，该状态不做强监督。</span></li>
             <li><strong>重放 context，监督关键 step</strong><span>一条 trace 中早期和中段多数 step 的 loss_weight 为 0，只负责按真实顺序把 hidden 推到分支点；真正产生交叉熵 loss 的，是得到反事实目标的尾部 supervised step。</span></li>
             <li><strong>anchor 保守更新</strong><span>最终 target = 0.75 × 原模型概率 + 0.25 × 反事实目标。它不是强迫网络完全改成某个动作，而是在保留 75% 原策略的同时注入翻盘证据，防止稀疏标签导致灾难性遗忘。</span></li>
-            <li><strong>危险状态加权</strong><span>危险 step 的 loss 乘 1.5，因为逃生与炸弹时序错误通常直接决定死亡；普通状态保持基础权重。学习率使用 0.00005，主要精修 128 维 nonlinear head/readout，而不是大幅重写整个 RNN body。</span></li>
+            <li><strong>危险状态加权</strong><span>危险 step 的 loss 乘 1.5，因为逃生与炸弹时序错误通常直接决定死亡；普通状态保持基础权重。学习率使用 0.00005，只训练 128 维 nonlinear head/readout，512 维 RNN body 在这次精修中冻结。</span></li>
             <li><strong>多 seed 审计后才晋级</strong><span>每个短 run 训练完先打 seed 42、123、999 等多组对局。只在单个 seed 变好、其他 seed 明显退化的模型直接淘汰；最终保留互补 checkpoint，再做离线权重插值。</span></li>
           </ol>
           <div class="nn-target-formula" aria-label="anchor soft target 公式">
@@ -527,17 +531,46 @@ app.innerHTML = `
           <div class="help-section-title">
             <span class="help-step">06</span>
             <div>
-              <h3>最终一次训练的实际规模</h3>
-              <p>最终采用精确反事实标注（exact-counterfactual）做 head 精修；最贵的部分是 6 动作终局分支标注，RNN head 更新本身较轻。</p>
+              <h3>每个训练步骤用了多少数据、多久</h3>
+              <p>最终采用精确反事实标注（exact-counterfactual）做 head 精修。下面先列父模型 A 的完整账本，再单列父模型 B；两个 run 独立训练，不是把 128 局合成一个数据集训练一次。</p>
             </div>
           </div>
-          <div class="nn-training-grid">
-            <div><strong>采集</strong><span>64 局 on-policy 对局</span><small>8 个 worker</small></div>
-            <div><strong>标注</strong><span>434 个可修正状态</span><small>6 分支，16 个 worker</small></div>
-            <div><strong>序列</strong><span>43 条有效 trace</span><small>10,578 steps；2,715 个危险 step</small></div>
-            <div><strong>优化</strong><span>3 epochs / batch 64</span><small>anchor 0.75，危险权重 1.5，16 线程</small></div>
+          <h4 class="nn-subtitle">先训练 RNN body：接受路线的底座血缘</h4>
+          <div class="nn-base-ledger" role="table" aria-label="RNN 初始化底座训练血缘">
+            <div class="nn-base-ledger-head" role="row"><b role="columnheader">阶段</b><b role="columnheader">数据来源</b><b role="columnheader">喂入规模</b><b role="columnheader">训练 / 耗时</b></div>
+            <div role="row"><strong role="cell">Outcome RNN 基线</strong><span role="cell">hard 规则 Bot 自对弈；保留 180 回合内且分差至少 5000 的赢家轨迹</span><span role="cell">1,800 局采集；309,129 steps；76,172 危险 steps；13,514 序列块</span><small role="cell">6 epochs；hidden 128；wall-clock 未记录</small></div>
+            <div role="row"><strong role="cell">保守 win/loss 微调</strong><span role="cell">以上一 checkpoint 为起点；hard 自对弈赢家正标签、输家弱负标签</span><span role="cell">1,000 局采集；330,877 steps；85,045 危险 steps；14,524 序列块</span><small role="cell">1 epoch；学习率 0.000008；wall-clock 未记录</small></div>
+            <div role="row"><strong role="cell">安全扩维 snapshot</strong><span role="cell">128→512 hidden、1472→1616 输入、seq 24→600；复制旧权重，新增区域置零</span><span role="cell">0 个新对局；0 个新标签；0 次梯度更新</span><small role="cell">只做模型结构转换；未单独计时</small></div>
           </div>
-          <p class="nn-copy">这次采集里当前模型赢 20 局、输 44 局；44 条输局中有 43 条产生有效修正，共找到 434 个可以改变终局的状态。完整探索持续数天，最耗时的是失败路线筛选、多 seed 审计和反事实终局模拟；训练日志没有统一记录单次 run 的精确 wall-clock，因此不虚构分钟级耗时。</p>
+          <p class="nn-ledger-caption">这三步得到最终 head 精修的共同初始化模型。前两步的 step 来自不同阶段且第二步从第一步继续训练，因此这里只逐阶段如实列出，不把 640,006 steps 宣称成去重后的独立状态数。</p>
+
+          <h4 class="nn-subtitle">再训练 nonlinear head：父模型 A 的完整 run</h4>
+          <div class="nn-training-ledger" role="table" aria-label="父模型 A 逐阶段训练数据和耗时">
+            <div class="nn-ledger-head" role="row"><b role="columnheader">步骤</b><b role="columnheader">输入与筛选</b><b role="columnheader">实际数据量</b><b role="columnheader">并发 / 耗时</b></div>
+            <div role="row"><strong role="cell">0. 初始化</strong><span role="cell">加载 1616×512 stateful snapshot；复制既有 body</span><span role="cell">0 个新对局；0 个 optimizer step</span><small role="cell">安全扩维未单独计时</small></div>
+            <div role="row"><strong role="cell">1. 对局采集</strong><span role="cell">当前 NN vs hard；C++ GameSim on-policy</span><span role="cell">64 局：20 胜 / 44 负 / 0 平</span><small role="cell">8 个 worker</small></div>
+            <div role="row"><strong role="cell">2. 尾部筛选</strong><span role="cell">只取 44 条输局最后最多 30 个 NN 决策</span><span role="cell">43 条 trace 产生有效标签</span><small role="cell">与标注阶段连续执行</small></div>
+            <div role="row"><strong role="cell">3. 精确标注</strong><span role="cell">每个候选状态复制 sim + hidden，强制枚举 6 动作到终局</span><span role="cell">保留 434 个监督状态；仅这些状态就对应 2,604 条动作分支</span><small role="cell">16 个 worker；全流程最重</small></div>
+            <div role="row"><strong role="cell">4. 序列组装</strong><span role="cell">context step 只恢复 hidden；correction step 计算 loss</span><span role="cell">10,578 唯一步：434 监督 + 10,144 context；2,715 危险</span><small role="cell">约 1,709 万个输入标量</small></div>
+            <div role="row"><strong role="cell">5. Head 优化</strong><span role="cell">冻结 RNN body；训练 head128 + 6 动作输出</span><span role="cell">3 epochs，batch 64；31,734 step-visits；1,302 次监督标签呈现</span><small role="cell">16 线程</small></div>
+            <div class="nn-ledger-total" role="row"><strong role="cell">A 端到端</strong><span role="cell">采集 + 标注 + 序列训练一次命令完成</span><span role="cell">seed 20260906</span><small role="cell">实测约 2 分 38 秒</small></div>
+          </div>
+          <div class="nn-parent-runs" role="table" aria-label="两个父模型训练数据对照">
+            <div class="nn-parent-runs-head" role="row"><b role="columnheader">父模型</b><b role="columnheader">对局</b><b role="columnheader">有效数据</b><b role="columnheader">实测总耗时</b></div>
+            <div role="row"><strong role="cell">A · anchor075</strong><span role="cell">64 局；20 胜 / 44 负</span><span role="cell">43 traces；434 labels；10,578 steps</span><small role="cell">2 分 38 秒</small></div>
+            <div role="row"><strong role="cell">B · seed909</strong><span role="cell">64 局；21 胜 / 43 负</span><span role="cell">40 traces；402 labels；9,982 steps</span><small role="cell">2 分 51 秒</small></div>
+            <div class="nn-parent-runs-total" role="row"><strong role="cell">两次 run 合计</strong><span role="cell">128 局；41 胜 / 87 负</span><span role="cell">83 traces；836 labels；20,560 唯一步</span><small role="cell">5 分 28 秒</small></div>
+          </div>
+          <div class="nn-data-volume">
+            <div><span>唯一输入标量</span><strong>33,224,960</strong><small>20,560 steps × 1616 维</small></div>
+            <div><span>3 epoch 遍历</span><strong>61,680</strong><small>累计 sequence step-visits</small></div>
+            <div><span>监督呈现次数</span><strong>2,508</strong><small>836 labels × 3 epochs</small></div>
+            <div><span>危险状态</span><strong>5,127</strong><small>A 2,715 + B 2,412</small></div>
+          </div>
+          <div class="nn-time-note">
+            <strong>耗时口径</strong>
+            <p>2 分 38 秒和 2 分 51 秒来自原始会话中训练命令的开始/完成时间戳，包含对局采集、反事实标注和 3 epoch head 优化。旧 trainer 没有分别输出 <code>collect_elapsed</code>、<code>label_elapsed</code> 和 <code>train_elapsed</code>，所以不能可靠拆出每一段的分钟数；只知道 6 动作终局分支标注是最重阶段。完整研发探索持续数天，但其中包含大量被淘汰模型和评估，不能算作最终模型一次训练耗时。</p>
+          </div>
         </section>
 
         <section class="help-section">
@@ -545,7 +578,7 @@ app.innerHTML = `
             <span class="help-step">07</span>
             <div>
               <h3>两个父模型从哪里来</h3>
-              <p>两个父模型结构和初始化路线一致，只改变 on-policy 数据采样 seed，让它们分别覆盖不同的失败分布。</p>
+              <p>两个父模型从同一个 safe-expanded 512-hidden/action-context snapshot 独立出发，训练配置完全相同，只改变 on-policy 数据采样 seed，让它们覆盖不同的失败分布。</p>
             </div>
           </div>
           <div class="nn-parent-flow">
@@ -564,7 +597,7 @@ app.innerHTML = `
               <span>逐参数 0.5 / 0.5 插值，选择多 seed 表现更均衡的单模型。</span>
             </div>
           </div>
-          <p class="nn-copy">最终网页只加载插值后的一个模型，不是运行时 ensemble，也不会同时推理两个父模型。权重插值发生在训练完成后的离线模型合成阶段。</p>
+          <p class="nn-copy">A 与 B 各自只看自己的 64 局数据；mix050 没有再喂新对局、没有继续反向传播，只把两个同形状 checkpoint 的每个参数按 0.5 / 0.5 做离线插值。最终网页只加载插值后的一个模型，不是运行时 ensemble，也不会同时推理两个父模型。</p>
         </section>
 
         <section class="help-section">
@@ -684,12 +717,32 @@ const lastPos = new Map<number, string>();
 
 const botOptions = [
   { id: 'manual', label: '手动', note: '由你用键盘或屏幕方向键操控。' },
-  { id: 'easy', label: '简单', note: '官方 easy 规则：BFS 寻找最优格，速度固定为 1。' },
-  { id: 'hard', label: '困难', note: '比赛版 C++ hard：危险逃生、放弹安全判定和独立随机方向序。' },
+  { id: 'easy', label: '简单', qualifier: '（easy，纯逻辑判断）', note: '官方 easy 规则：BFS 寻找最优格，速度固定为 1。' },
+  { id: 'hard', label: '困难', qualifier: '（hard，纯逻辑判断）', note: '比赛版 C++ hard：危险逃生、放弹安全判定和独立随机方向序。' },
   { id: 'search', label: '搜索增强', note: '3 层 C++ rollout 搜索，叠加 RNN 小先验和地图派生随机种子。' },
   { id: 'nn', label: '纯神经网络', note: '加载 DLRNNH1 模型，逐步用 RNN 策略输出动作。' },
 ];
 const defaultSeatBots = ['easy', 'nn', 'easy', 'easy'];
+const mobileBotLabelQuery = window.matchMedia('(max-width: 640px)');
+
+function botOption(id: string) {
+  return botOptions.find((bot) => bot.id === id);
+}
+
+function botLabelText(id: string, compact = mobileBotLabelQuery.matches): string {
+  const option = botOption(id);
+  if (!option) return '困难';
+  return option.label + (compact ? '' : (option.qualifier ?? ''));
+}
+
+function botLabelHtml(id: string): string {
+  const option = botOption(id);
+  if (!option) return '困难';
+  const qualifier = option.qualifier
+    ? `<span class="logic-qualifier">${option.qualifier}</span>`
+    : '';
+  return `${option.label}${qualifier}`;
+}
 
 class BotWorkerClient {
   private readonly worker: Worker;
@@ -846,9 +899,8 @@ function renderBotSelectors(): void {
   let html = '';
   for (let i = 0; i < num; i++) {
     const cur = prev[i] ?? defaultSeatBots[i] ?? 'hard';
-    const currentLabel =
-      botOptions.find((bot) => bot.id === cur)?.label ?? '困难';
-    const opts = botOptions.map((b) => `<option value="${b.id}"${b.id === cur ? ' selected' : ''}>${b.label}</option>`).join('');
+    const currentLabel = botLabelHtml(cur);
+    const opts = botOptions.map((b) => `<option value="${b.id}"${b.id === cur ? ' selected' : ''}>${botLabelText(b.id)}</option>`).join('');
     html += `
       <div class="field">
         <label><span class="seat-chip" style="background:${seatColors[i]}"></span>${seatNames[i]}方 玩家</label>
@@ -856,7 +908,7 @@ function renderBotSelectors(): void {
           <select class="seat-select" data-seat="${i}" aria-label="${seatNames[i]}方玩家机器人">${opts}</select>
           <div class="seat-selection-overlay">
             <span class="seat-selection-label" aria-hidden="true">${currentLabel}</span>
-            <button class="nn-info-trigger${cur === 'nn' ? '' : ' is-hidden'}" type="button" data-nn-info="${i}" aria-label="查看${seatNames[i]}方纯神经网络训练说明" aria-haspopup="dialog" aria-controls="nnDialog" title="查看纯神经网络训练说明">?</button>
+            <button class="nn-info-trigger${cur === 'nn' ? '' : ' is-hidden'}" type="button" data-nn-info="${i}" aria-label="查看${seatNames[i]}方纯神经网络训练说明" aria-haspopup="dialog" aria-controls="nnDialog" title="查看纯神经网络训练说明"><span aria-hidden="true">?</span></button>
           </div>
         </div>
       </div>`;
@@ -878,9 +930,20 @@ function syncNnInfoTrigger(select: HTMLSelectElement): void {
   const trigger = wrap?.querySelector<HTMLButtonElement>('.nn-info-trigger');
   const label = wrap?.querySelector<HTMLSpanElement>('.seat-selection-label');
   if (label) {
-    label.textContent = select.selectedOptions[0]?.textContent ?? select.value;
+    label.innerHTML = botLabelHtml(select.value);
   }
   trigger?.classList.toggle('is-hidden', select.value !== 'nn');
+}
+
+function refreshResponsiveBotLabels(): void {
+  botSelectors.querySelectorAll<HTMLSelectElement>('.seat-select').forEach((select) => {
+    for (const option of select.options) {
+      option.textContent = botLabelText(option.value);
+    }
+    syncNnInfoTrigger(select);
+  });
+  updateNames();
+  renderStats();
 }
 
 function seatBotIds(): string[] {
@@ -888,6 +951,7 @@ function seatBotIds(): string[] {
 }
 
 renderBotSelectors();
+mobileBotLabelQuery.addEventListener('change', refreshResponsiveBotLabels);
 
 window.addEventListener('error', (e) => setError(`运行错误：${e.message}`));
 window.addEventListener('unhandledrejection', (e) => setError(`运行错误：${String(e.reason).slice(0, 90)}`));
@@ -1125,12 +1189,12 @@ function importMatch(payload: ExportedMatch): void {
 function updateNames(): void {
   const seats = seatBotIds();
   versusEl.innerHTML = state.players
-    .map((p) => `<span class="side"><span class="chip" style="background:${p.color}"></span>${bots.get(p.id)?.label ?? ''}</span>`)
+    .map((p, i) => `<span class="side"><span class="chip" style="background:${p.color}"></span>${botLabelHtml(seats[i] ?? 'hard')}</span>`)
     .join('<span class="vs">VS</span>');
   botNote.innerHTML = state.players
     .map((p, i) => {
       const opt = botOptions.find((b) => b.id === seats[i]);
-      return `<b style="color:${p.color}">${p.name}方 · ${opt?.label ?? ''}</b>：${opt?.note ?? ''}`;
+      return `<b style="color:${p.color}">${p.name}方 · ${botLabelHtml(seats[i] ?? 'hard')}</b>：${opt?.note ?? ''}`;
     })
     .join('<br />');
 }
@@ -1218,9 +1282,11 @@ function showWinner(): void {
   const ids = state.winnerIds;
   if (ids.length === 1) {
     const p = state.players.find((x) => x.id === ids[0]);
+    const seatIndex = state.players.findIndex((x) => x.id === ids[0]);
+    const botId = seatBotIds()[seatIndex] ?? 'hard';
     winnerBig.textContent = `${p?.name ?? ''}方 获胜`;
     winnerBig.style.color = p?.color ?? '#fff';
-    winnerSub.textContent = `${bots.get(ids[0])?.label ?? ''} · 用时 ${state.round} 回合`;
+    winnerSub.innerHTML = `${botLabelHtml(botId)} · 用时 ${state.round} 回合`;
   } else {
     winnerBig.textContent = '平局';
     winnerBig.style.color = '#e6edf7';
@@ -1343,6 +1409,21 @@ document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach((b) => {
 });
 
 window.addEventListener('keydown', (e) => {
+  const target = e.target;
+  if (target instanceof HTMLElement) {
+    if (
+      target.isContentEditable ||
+      target.matches('input, select, textarea')
+    ) {
+      return;
+    }
+    if (
+      target.matches('button, a[href]') &&
+      (e.key === 'Enter' || e.key === ' ')
+    ) {
+      return;
+    }
+  }
   const map: Record<string, Action> = {
     ArrowUp: Action.Up,
     ArrowDown: Action.Down,
@@ -1845,8 +1926,9 @@ function darken(hex: string): string {
 }
 
 function renderStats(): void {
+  const seats = seatBotIds();
   statsEl.innerHTML = state.players
-    .map((p) => {
+    .map((p, index) => {
       const hpSlots = Math.max(state.config.playerMaxHp, p.hp);
       const hpDots = Array.from({ length: hpSlots }, (_, i) => `<i class="${i < p.hp ? 'on' : ''}"></i>`).join('');
       const badges = [
@@ -1860,7 +1942,7 @@ function renderStats(): void {
             <span class="swatch" style="background:${p.color}"></span>
             <span class="pname">${p.name}方</span>
             <span class="hp-dots">${hpDots}</span>
-            <span class="prole">${bots.get(p.id)?.label ?? ''}</span>
+            <span class="prole">${botLabelHtml(seats[index] ?? 'hard')}</span>
           </div>
           <div class="pstats">
             <div class="pstat"><div class="k">得分</div><div class="v">${p.score}</div></div>

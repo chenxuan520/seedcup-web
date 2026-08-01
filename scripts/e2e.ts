@@ -100,6 +100,29 @@ async function main() {
   ) {
     throw new Error(`mobile help overflow: ${JSON.stringify(mobileHelp)}`);
   }
+  const mobileRuleLabels = await page.$$eval(
+    '.seat-select-wrap',
+    (wraps) => wraps.map((wrap) => {
+      const select = wrap.querySelector<HTMLSelectElement>('.seat-select');
+      return {
+        visible: (
+          wrap.querySelector<HTMLElement>('.seat-selection-label')?.innerText ??
+          ''
+        ).trim(),
+        selected: select?.selectedOptions[0]?.textContent?.trim() ?? '',
+      };
+    }),
+  );
+  if (
+    mobileRuleLabels[0]?.visible !== '简单' ||
+    mobileRuleLabels[0]?.selected !== '简单' ||
+    mobileRuleLabels[1]?.visible !== '纯神经网络' ||
+    mobileRuleLabels[1]?.selected !== '纯神经网络'
+  ) {
+    throw new Error(
+      `mobile bot qualifiers should be hidden: ${JSON.stringify(mobileRuleLabels)}`,
+    );
+  }
   await page.click('#helpCloseBtn');
   if (await page.$eval('#helpDialog', (dialog) => (dialog as HTMLDialogElement).open)) {
     throw new Error('help dialog did not close');
@@ -107,6 +130,7 @@ async function main() {
   const nnInfo = await page.$$eval('.nn-info-trigger', (buttons) =>
     buttons.map((button) => {
       const trigger = button.getBoundingClientRect();
+      const icon = button.querySelector('span')?.getBoundingClientRect();
       const wrap = button.closest('.seat-select-wrap')?.getBoundingClientRect();
       const label = button
         .closest('.seat-select-wrap')
@@ -115,8 +139,10 @@ async function main() {
       return {
         hidden: button.classList.contains('is-hidden'),
         label: button.getAttribute('aria-label') ?? '',
-        textGap: label ? trigger.left - label.right : -1,
+        textGap: label && icon ? icon.left - label.right : -1,
         trailingSpace: wrap ? wrap.right - trigger.right : -1,
+        width: trigger.width,
+        height: trigger.height,
       };
     }),
   );
@@ -127,16 +153,20 @@ async function main() {
     !nnInfo[1].label.includes('纯神经网络') ||
     nnInfo[1].textGap < 3 ||
     nnInfo[1].textGap > 7 ||
-    nnInfo[1].trailingSpace <= 30
+    nnInfo[1].trailingSpace <= 30 ||
+    nnInfo[1].width < 32 ||
+    nnInfo[1].height < 32
   ) {
     throw new Error(`nn info trigger mismatch: ${JSON.stringify(nnInfo)}`);
   }
-  await page.click('.nn-info-trigger[data-nn-info="1"]');
+  await page.focus('.nn-info-trigger[data-nn-info="1"]');
+  await page.keyboard.press('Enter');
   const mobileNn = await page.$eval('#nnDialog', (dialog) => {
     const element = dialog as HTMLDialogElement;
     const rect = element.getBoundingClientRect();
     const close = element.querySelector('#nnCloseBtn')?.getBoundingClientRect();
     const download = element.querySelector<HTMLAnchorElement>('#nnDownloadLink');
+    const body = element.querySelector('.help-body');
     return {
       open: element.open,
       text: element.textContent ?? '',
@@ -148,22 +178,34 @@ async function main() {
       closeVisible: Boolean(
         close && close.top >= 0 && close.bottom <= window.innerHeight,
       ),
+      noHorizontalOverflow: Boolean(
+        body && body.scrollWidth <= body.clientWidth + 1,
+      ),
     };
   });
   if (
     !mobileNn.open ||
     !mobileNn.text.includes('1,156,486') ||
-    !mobileNn.text.includes('434 个可修正状态') ||
+    !mobileNn.text.includes('434 个监督状态') ||
     !mobileNn.text.includes('1426 + 16 + 30 + 144 = 1616') ||
     !mobileNn.text.includes('827,392') ||
     !mobileNn.text.includes('262,144') ||
     !mobileNn.text.includes('拾取前不区分道具类型') ||
     !mobileNn.text.includes('0.75 × base_policy') ||
+    !mobileNn.text.includes('1,800 局采集') ||
+    !mobileNn.text.includes('309,129 steps') ||
+    !mobileNn.text.includes('1,000 局采集') ||
+    !mobileNn.text.includes('330,877 steps') ||
+    !mobileNn.text.includes('33,224,960') ||
+    !mobileNn.text.includes('2 分 38 秒') ||
+    !mobileNn.text.includes('2 分 51 秒') ||
+    !mobileNn.text.includes('不能可靠拆出每一段的分钟数') ||
     mobileNn.download !== 'pure-nn.rnn' ||
     !mobileNn.href.includes('/models/pure-nn.rnn') ||
     mobileNn.left < 0 ||
     mobileNn.right > mobileNn.viewport ||
-    !mobileNn.closeVisible
+    !mobileNn.closeVisible ||
+    !mobileNn.noHorizontalOverflow
   ) {
     throw new Error(`nn dialog mismatch: ${JSON.stringify(mobileNn)}`);
   }
@@ -171,28 +213,46 @@ async function main() {
   if (await page.$eval('#nnDialog', (dialog) => (dialog as HTMLDialogElement).open)) {
     throw new Error('nn dialog did not close');
   }
+  await page.focus('.nn-info-trigger[data-nn-info="1"]');
+  await page.keyboard.press('Space');
+  if (!await page.$eval('#nnDialog', (dialog) => (dialog as HTMLDialogElement).open)) {
+    throw new Error('nn dialog did not open with Space');
+  }
+  await page.click('#nnCloseBtn');
   await page.setViewportSize({ width: 1360, height: 1080 });
 
   await page.selectOption('.seat-select[data-seat="0"]', 'nn');
-  const changedNnTriggers = await page.$$eval('.nn-info-trigger', (buttons) =>
-    buttons.map((button) => button.classList.contains('is-hidden')),
+  const changedNnState = await page.$$eval('.seat-select-wrap', (wraps) =>
+    wraps.map((wrap) => ({
+      hidden: wrap.querySelector('.nn-info-trigger')?.classList.contains('is-hidden'),
+      text: wrap.querySelector('.seat-selection-label')?.textContent ?? '',
+    })),
   );
-  if (changedNnTriggers.length !== 2 || changedNnTriggers.some(Boolean)) {
+  if (
+    changedNnState.length !== 2 ||
+    changedNnState.some((seat) => seat.hidden) ||
+    changedNnState.some((seat) => seat.text !== '纯神经网络')
+  ) {
     throw new Error(
-      `nn info trigger did not follow selection: ${JSON.stringify(changedNnTriggers)}`,
+      `nn selection overlay did not follow selection: ${JSON.stringify(changedNnState)}`,
     );
   }
   await page.selectOption('.seat-select[data-seat="0"]', 'easy');
-  const restoredNnTriggers = await page.$$eval('.nn-info-trigger', (buttons) =>
-    buttons.map((button) => button.classList.contains('is-hidden')),
+  const restoredNnState = await page.$$eval('.seat-select-wrap', (wraps) =>
+    wraps.map((wrap) => ({
+      hidden: wrap.querySelector('.nn-info-trigger')?.classList.contains('is-hidden'),
+      text: wrap.querySelector('.seat-selection-label')?.textContent ?? '',
+    })),
   );
   if (
-    restoredNnTriggers.length !== 2 ||
-    !restoredNnTriggers[0] ||
-    restoredNnTriggers[1]
+    restoredNnState.length !== 2 ||
+    !restoredNnState[0].hidden ||
+    restoredNnState[1].hidden ||
+    restoredNnState[0].text !== '简单（easy，纯逻辑判断）' ||
+    restoredNnState[1].text !== '纯神经网络'
   ) {
     throw new Error(
-      `nn info trigger did not restore: ${JSON.stringify(restoredNnTriggers)}`,
+      `nn selection overlay did not restore: ${JSON.stringify(restoredNnState)}`,
     );
   }
 
@@ -220,6 +280,34 @@ async function main() {
   };
 
   const problems: string[] = [];
+
+  // 按钮保留焦点时，WASD 仍应交给手动玩家，而 Enter/Space 保留按钮语义。
+  await page.selectOption('.seat-select[data-seat="0"]', 'manual');
+  await page.selectOption('.seat-select[data-seat="1"]', 'hard');
+  const manualStart = (await readPlayers())[0];
+  await page.click('#playBtn');
+  const focusAfterPlay = await page.evaluate(
+    () => (document.activeElement as HTMLElement | null)?.id ?? '',
+  );
+  if (focusAfterPlay !== 'playBtn') {
+    problems.push(`play button did not retain focus: ${focusAfterPlay}`);
+  }
+  const inwardKeys =
+    manualStart.x < 6
+      ? ['s', manualStart.y < 6 ? 'd' : 'a']
+      : ['w', manualStart.y < 6 ? 'd' : 'a'];
+  let manualMovedWithButtonFocus = false;
+  for (let attempt = 0; attempt < 20 && !manualMovedWithButtonFocus; attempt++) {
+    for (const key of inwardKeys) await page.keyboard.press(key);
+    await page.waitForTimeout(120);
+    const current = (await readPlayers())[0];
+    manualMovedWithButtonFocus =
+      current.x !== manualStart.x || current.y !== manualStart.y;
+  }
+  if (!manualMovedWithButtonFocus) {
+    problems.push('manual player did not move while play button retained focus');
+  }
+  if ((await page.textContent('#playBtn')) === '暂停') await page.click('#playBtn');
 
   // 场景1: 2 人 13x13 困难 vs 困难
   await page.selectOption('#playerNum', '2');
@@ -318,6 +406,24 @@ async function main() {
     await stepRound();
     const afterImportCards = await page.$$eval('.player-card', (cards) => cards.length);
     if (afterImportCards !== 4) problems.push(`import restored wrong player count: ${afterImportCards}`);
+    const afterImportSelections = await page.$$eval(
+      '.seat-select-wrap',
+      (wraps) => wraps.map((wrap) => {
+        const select = wrap.querySelector<HTMLSelectElement>('.seat-select');
+        return {
+          selected: select?.selectedOptions[0]?.textContent ?? '',
+          visible: wrap.querySelector('.seat-selection-label')?.textContent ?? '',
+        };
+      }),
+    );
+    if (
+      afterImportSelections.length !== 4 ||
+      afterImportSelections.some((seat) => seat.selected !== seat.visible)
+    ) {
+      problems.push(
+        `import bot labels out of sync: ${JSON.stringify(afterImportSelections)}`,
+      );
+    }
   }
 
   if (errors.length) problems.push(`pageerror: ${errors.join(' | ')}`);

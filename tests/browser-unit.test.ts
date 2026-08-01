@@ -23,6 +23,9 @@ describe('browser application controls', () => {
     ];
     expect(seats.map((seat) => seat.value)).toEqual(['easy', 'nn']);
     expect(document.querySelectorAll('.player-card')).toHaveLength(2);
+    expect(document.querySelector('#stats')?.textContent).toContain(
+      '简单（easy，纯逻辑判断）',
+    );
     expect(document.querySelector('#modelStatus')?.classList).toContain(
       'ready',
     );
@@ -34,12 +37,16 @@ describe('browser application controls', () => {
     expect(nnTriggers[1].classList).not.toContain('is-hidden');
     const nnWrap = nnTriggers[1].closest('.seat-select-wrap')!;
     const nnLabel = nnWrap.querySelector<HTMLElement>('.seat-selection-label')!;
+    const nnIcon = nnTriggers[1].querySelector<HTMLElement>('span')!;
     const wrapRect = nnWrap.getBoundingClientRect();
     const labelRect = nnLabel.getBoundingClientRect();
     const triggerRect = nnTriggers[1].getBoundingClientRect();
-    expect(triggerRect.left - labelRect.right).toBeGreaterThanOrEqual(3);
-    expect(triggerRect.left - labelRect.right).toBeLessThanOrEqual(7);
+    const iconRect = nnIcon.getBoundingClientRect();
+    expect(iconRect.left - labelRect.right).toBeGreaterThanOrEqual(3);
+    expect(iconRect.left - labelRect.right).toBeLessThanOrEqual(7);
     expect(wrapRect.right - triggerRect.right).toBeGreaterThan(30);
+    expect(triggerRect.width).toBeGreaterThanOrEqual(32);
+    expect(triggerRect.height).toBeGreaterThanOrEqual(32);
 
     click('#helpBtn');
     expect(
@@ -81,6 +88,22 @@ describe('browser application controls', () => {
     );
     expect(nnDialog.textContent).toContain('学习率使用 0.00005');
     expect(nnDialog.textContent).toContain('多 seed 审计后才晋级');
+    expect(nnDialog.textContent).toContain('1,800 局采集');
+    expect(nnDialog.textContent).toContain('309,129 steps');
+    expect(nnDialog.textContent).toContain('1,000 局采集');
+    expect(nnDialog.textContent).toContain('330,877 steps');
+    expect(nnDialog.textContent).toContain('0 个新对局');
+    expect(nnDialog.textContent).toContain('434 个监督状态');
+    expect(nnDialog.textContent).toContain('402 labels');
+    expect(nnDialog.textContent).toContain('33,224,960');
+    expect(nnDialog.textContent).toContain('61,680');
+    expect(nnDialog.textContent).toContain('2,508');
+    expect(nnDialog.textContent).toContain('2 分 38 秒');
+    expect(nnDialog.textContent).toContain('2 分 51 秒');
+    expect(nnDialog.textContent).toContain('5 分 28 秒');
+    expect(nnDialog.textContent).toContain('不能可靠拆出每一段的分钟数');
+    expect(nnDialog.textContent).toContain('冻结 RNN body');
+    expect(nnDialog.textContent).toContain('没有下载公开数据集');
     const download = document.querySelector<HTMLAnchorElement>(
       '#nnDownloadLink',
     )!;
@@ -90,6 +113,14 @@ describe('browser application controls', () => {
     click('#nnCloseBtn');
     expect(nnDialog.open).toBe(false);
     expect(document.body.classList).not.toContain('dialog-open');
+    nnTriggers[1].focus();
+    const spaceEvent = new KeyboardEvent('keydown', {
+      key: ' ',
+      bubbles: true,
+      cancelable: true,
+    });
+    nnTriggers[1].dispatchEvent(spaceEvent);
+    expect(spaceEvent.defaultPrevented).toBe(false);
   });
 
   test('start, pause, resume, reset, and single step work', async () => {
@@ -136,6 +167,16 @@ describe('browser application controls', () => {
         button.classList.contains('is-hidden'),
       ),
     ).toEqual([true, true, true, false]);
+    expect(
+      [...document.querySelectorAll('.seat-selection-label')].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual([
+      '手动',
+      '困难（hard，纯逻辑判断）',
+      '搜索增强',
+      '纯神经网络',
+    ]);
 
     const seed = document.querySelector<HTMLInputElement>('#seedInput')!;
     seed.value = '12345';
@@ -160,6 +201,16 @@ describe('browser application controls', () => {
     seed.value = '100';
     click('#shuffleBtn');
     expect(seed.value).toBe('');
+
+    const play = document.querySelector<HTMLButtonElement>('#playBtn')!;
+    play.focus();
+    const focusedMove = new KeyboardEvent('keydown', {
+      key: 'a',
+      bubbles: true,
+      cancelable: true,
+    });
+    play.dispatchEvent(focusedMove);
+    expect(focusedMove.defaultPrevented).toBe(true);
 
     for (const key of ['w', 'a', 's', 'd', 'ArrowUp', ' ']) {
       window.dispatchEvent(new KeyboardEvent('keydown', { key }));
@@ -322,6 +373,15 @@ describe('browser application controls', () => {
         button.classList.contains('is-hidden'),
       ),
     ).toEqual([true, false, true]);
+    expect(
+      [...document.querySelectorAll('.seat-selection-label')].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual([
+      '搜索增强',
+      '纯神经网络',
+      '简单（easy，纯逻辑判断）',
+    ]);
     expect(document.querySelector('#winnerBig')?.textContent).toBe('平局');
     expect(document.querySelector('#winnerOverlay')?.classList).toContain(
       'show',
